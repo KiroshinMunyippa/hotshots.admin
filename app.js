@@ -5,6 +5,7 @@ const supabase = createClient(SUPABASE_ACCOUNTS_URL, SUPABASE_ACCOUNTS_ANON_KEY)
 const app = document.getElementById('app');
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[char]);
+
 const showToast = (message) => {
   const toast = document.getElementById('toast');
   toast.textContent = message;
@@ -12,13 +13,23 @@ const showToast = (message) => {
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2600);
 };
+
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 const formatTime = (iso) => iso ? new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—';
 
 const state = {
-  session: null, adminProfile: null, authChecked: false, authError: '',
-  tab: 'summary', users: [], recipes: [], stats: null, logs: [],
-  userSearch: '', recipeSearch: '', loading: false
+  session: null,
+  adminProfile: null,
+  authChecked: false,
+  authError: '',
+  tab: 'summary',
+  users: [],
+  recipes: [],
+  stats: null,
+  logs: [],
+  userSearch: '',
+  recipeSearch: '',
+  loading: false
 };
 
 async function authFetch(path, options = {}) {
@@ -40,7 +51,8 @@ async function checkAdmin() {
 }
 
 async function loadAll() {
-  state.loading = true; render();
+  state.loading = true;
+  render();
   try {
     const [{ users }, { recipes }, stats, logs] = await Promise.all([
       authFetch('/api/admin/users'),
@@ -48,9 +60,15 @@ async function loadAll() {
       authFetch('/api/admin/stats'),
       authFetch('/api/admin/logs')
     ]);
-    state.users = users; state.recipes = recipes; state.stats = stats; state.logs = logs;
-  } catch (err) { showToast(err.message); }
-  state.loading = false; render();
+    state.users = users;
+    state.recipes = recipes;
+    state.stats = stats;
+    state.logs = logs || [];
+  } catch (err) {
+    showToast(err.message);
+  }
+  state.loading = false;
+  render();
 }
 
 function renderAuth() {
@@ -78,7 +96,6 @@ function renderShell(content) {
   </aside><main class="main">${content}</main>`;
 }
 
-// --- SUMMARY PAGE ---
 function renderSummary() {
   if (!state.stats) return '<p>Loading stats...</p>';
   const { users, paid, recipes, shared } = state.stats;
@@ -103,7 +120,6 @@ function renderSummary() {
         <span class="stat-label">Shared Recipes</span>
       </div>
     </div>
-    
     <h2 style="font-size: 16px; margin: 30px 0 16px;">Recent Activity</h2>
     <div class="logs-container">
       ${state.logs.slice(0, 5).map(log => `
@@ -118,7 +134,6 @@ function renderSummary() {
     </div>`;
 }
 
-// --- USERS PAGE ---
 function renderUsers() {
   const search = state.userSearch.trim().toLowerCase();
   const rows = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
@@ -138,7 +153,6 @@ function renderUsers() {
     </tbody></table></div>`;
 }
 
-// --- RECIPES PAGE ---
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
   const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search));
@@ -156,7 +170,6 @@ function renderRecipes() {
     </tbody></table></div>`;
 }
 
-// --- LOGS PAGE ---
 function renderLogs() {
   return `<h1>Logs</h1><p class="main-subtitle">System activity and changes.</p>
     <div class="logs-container">
@@ -172,7 +185,6 @@ function renderLogs() {
     </div>`;
 }
 
-// --- DATABASE INFO PAGE (Matches Screenshot) ---
 function renderDatabase() {
   const services = [
     { name: 'Database', status: 'Healthy' },
@@ -215,9 +227,9 @@ function render() {
   renderShell(content);
 }
 
-// Event Listeners
 document.addEventListener('click', event => {
-  const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; return render(); }
+  const tab = event.target.closest('[data-tab]');
+  if (tab) { state.tab = tab.dataset.tab; return render(); }
   if (event.target.closest('#admin-sign-out')) return supabase.auth.signOut();
 
   const saveUser = event.target.closest('[data-save-user]');
@@ -270,7 +282,11 @@ document.addEventListener('input', event => {
 supabase.auth.onAuthStateChange(async (_event, newSession) => {
   const wasSignedIn = Boolean(state.session);
   state.session = newSession;
-  if (newSession && !wasSignedIn) { render(); await checkAdmin(); if (state.adminProfile?.is_admin) await loadAll(); else render(); }
+  if (newSession && !wasSignedIn) {
+    render();
+    await checkAdmin();
+    if (state.adminProfile?.is_admin) await loadAll(); else render();
+  }
   if (!newSession) { state.adminProfile = null; state.authChecked = false; state.users = []; state.recipes = []; state.stats = null; state.logs = []; state.tab = 'summary'; render(); }
 });
 
