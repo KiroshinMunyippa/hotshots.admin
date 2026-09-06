@@ -9,7 +9,9 @@ body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--bg); }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; }
 input, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--ink); }
+
 #app { display: flex; min-height: 100vh; }
+
 .sidebar { display: flex; flex-direction: column; width: 210px; flex: none; padding: 22px 14px; border-right: 1px solid var(--line); background: var(--panel); }
 .brand { margin: 0 0 26px; padding: 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
 .brand span { color: var(--acid); }
@@ -22,15 +24,19 @@ input, select { background: var(--panel-2); border: 1px solid var(--line); borde
 .admin-chip strong { display: block; color: var(--ink); font-size: 12px; }
 .sign-out-link { width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--danger); font-size: 12px; font-weight: 600; text-align: left; }
 .sign-out-link:hover { background: rgba(224,100,90,.1); }
+
 .main { flex: 1; min-width: 0; padding: 28px 34px 60px; }
 .main h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.4px; }
 .main-subtitle { margin: 0 0 22px; color: var(--muted); font-size: 13px; }
+
 .stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 26px; }
 .stat-box { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 .stat-box strong { display: block; font-size: 22px; letter-spacing: -.5px; }
 .stat-box span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .toolbar input[type="search"] { flex: 1; max-width: 320px; }
+
 .table-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th { padding: 11px 14px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; text-align: left; border-bottom: 1px solid var(--line); }
@@ -39,6 +45,7 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--panel-2); }
 td.name-cell strong { display: block; }
 td.name-cell small { color: var(--muted); font-size: 11px; }
+
 .badge { display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
 .badge.plan-free { background: rgba(154,163,152,.15); color: var(--muted); }
 .badge.plan-plus, .badge.plan-pro { background: rgba(215,250,89,.15); color: var(--acid); }
@@ -46,13 +53,16 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .badge.status-past_due, .badge.status-canceled { background: rgba(224,100,90,.15); color: var(--danger); }
 .badge.shared-yes { background: rgba(215,250,89,.12); color: var(--acid); }
 .badge.shared-no { background: rgba(229,174,97,.15); color: var(--warn); }
+
 .row-actions { display: flex; gap: 6px; align-items: center; }
 .row-actions select { padding: 5px 7px; font-size: 11px; }
 .icon-button { padding: 5px 9px; border-radius: 7px; border: 1px solid var(--line); font-size: 11px; font-weight: 600; }
 .icon-button:hover { background: var(--panel-2); }
 .icon-button.danger { color: var(--danger); border-color: rgba(224,100,90,.3); }
 .icon-button.save { color: var(--acid-ink); background: var(--acid); border-color: transparent; }
+
 .empty-row td { padding: 30px 14px; color: var(--muted); text-align: center; }
+
 .auth-shell { display: grid; place-items: center; min-height: 100vh; width: 100%; padding: 20px; }
 .auth-card { width: 100%; max-width: 340px; padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
 .auth-card h1 { margin: 0 0 4px; font-size: 18px; }
@@ -62,8 +72,10 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .auth-card input { width: 100%; }
 .auth-card .primary-button { width: 100%; margin-top: 6px; padding: 10px; border-radius: 9px; background: var(--acid); color: var(--acid-ink); font-weight: 700; font-size: 13px; }
 .auth-error, .locked-note { margin: 10px 0 0; padding: 9px 10px; border-radius: 8px; background: rgba(224,100,90,.12); color: var(--danger); font-size: 12px; line-height: 1.4; }
+
 .toast { position: fixed; bottom: 22px; left: 50%; z-index: 20; padding: 10px 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; opacity: 0; transform: translate(-50%, 8px); transition: opacity .25s, transform .25s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 @media (max-width: 720px) {
   #app { flex-direction: column; }
   .sidebar { flex-direction: row; width: 100%; overflow-x: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
