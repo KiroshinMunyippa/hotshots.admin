@@ -54,6 +54,7 @@ export default async function handler(req, res) {
       });
     }
 
+    // Sort by time descending
     events.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     res.status(200).json(events.slice(0, 30));
