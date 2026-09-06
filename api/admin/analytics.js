@@ -7,7 +7,6 @@ export default async function handler(req, res) {
   const appdata = createClient(process.env.SUPABASE_APPDATA_URL, process.env.SUPABASE_APPDATA_SERVICE_KEY);
 
   try {
-    // 1. Total Users & Plan Distribution
     const { data: users } = await accounts.from('profiles').select('subscription_plan');
     const totalUsers = users?.length || 0;
     const planDist = users?.reduce((acc, u) => {
@@ -15,7 +14,6 @@ export default async function handler(req, res) {
       return acc;
     }, {}) || {};
 
-    // 2. Signups last 30 days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const { count: recentSignups } = await accounts
@@ -23,19 +21,13 @@ export default async function handler(req, res) {
       .select('*', { count: 'exact', head: true })
       .gte('created_at', thirtyDaysAgo.toISOString());
 
-    // 3. Recipe Categories
     const { data: recipes } = await appdata.from('recipes').select('category');
     const catDist = recipes?.reduce((acc, r) => {
       acc[r.category] = (acc[r.category] || 0) + 1;
       return acc;
     }, {}) || {};
 
-    res.status(200).json({
-      totalUsers,
-      recentSignups: recentSignups || 0,
-      planDist,
-      catDist
-    });
+    res.status(200).json({ totalUsers, recentSignups: recentSignups || 0, planDist, catDist });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
