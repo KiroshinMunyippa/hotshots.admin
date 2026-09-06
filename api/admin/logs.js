@@ -11,14 +11,14 @@ export default async function handler(req, res) {
   );
 
   try {
-    // 1. Fetch recent audit logs (DB changes)
+    // Fetch recent audit logs (DB changes)
     const { data: auditLogs, error: auditError } = await accounts
       .from('audit_logs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(20);
 
-    // 2. Fetch recent new accounts
+    // Fetch recent new accounts
     const { data: newProfiles, error: profileError } = await accounts
       .from('profiles')
       .select('id, display_name, email, created_at')
@@ -28,7 +28,6 @@ export default async function handler(req, res) {
     if (auditError) throw auditError;
     if (profileError) throw profileError;
 
-    // 3. Merge and sort by date
     const events = [];
 
     if (auditLogs) {
@@ -55,10 +54,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // Sort by time descending
     events.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    res.status(200).json(events.slice(0, 30)); // Return top 30 recent events
+    res.status(200).json(events.slice(0, 30));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
