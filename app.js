@@ -15,16 +15,18 @@ const showToast = (message) => {
 };
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+const formatTime = (iso) => iso ? new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—';
 
 const state = {
   session: null,
   adminProfile: null,
   authChecked: false,
   authError: '',
-  tab: 'users',
+  tab: 'summary',
   users: [],
   recipes: [],
   stats: null,
+  logs: [],
   userSearch: '',
   recipeSearch: '',
   loading: false
@@ -52,14 +54,16 @@ async function loadAll() {
   state.loading = true;
   render();
   try {
-    const [{ users }, { recipes }, stats] = await Promise.all([
+    const [{ users }, { recipes }, stats, logs] = await Promise.all([
       authFetch('/api/admin/users'),
       authFetch('/api/admin/recipes'),
-      authFetch('/api/admin/stats')
+      authFetch('/api/admin/stats'),
+      authFetch('/api/admin/logs')
     ]);
     state.users = users;
     state.recipes = recipes;
     state.stats = stats;
+    state.logs = logs || [];
   } catch (err) {
     showToast(err.message);
   }
@@ -75,39 +79,115 @@ function renderLocked() {
   app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>Not an admin account</h1><p>${escapeHtml(state.adminProfile?.email || 'This account')} isn't flagged as an administrator.</p><button class="primary-button" id="admin-sign-out" type="button">Sign out</button></div></div>`;
 }
 
-function statStrip() {
-  if (!state.stats) return '';
-  const items = [
-    { label: 'Users', value: state.stats.users },
-    { label: 'Recipes', value: state.stats.recipes },
-    { label: 'Shared', value: state.stats.shared },
-    { label: 'Paid plans', value: state.stats.paid }
-  ];
-  return `<div class="stat-strip">${items.map(i => `<div class="stat-box"><strong>${i.value}</strong><span>${i.label}</span></div>`).join('')}</div>`;
+function renderShell(content) {
+  app.innerHTML = `<aside class="sidebar">
+    <p class="brand">HotShots<span>Admin</span></p>
+    <nav class="side-nav">
+      <button data-tab="summary" class="${state.tab === 'summary' ? 'active' : ''}">Summary</button>
+      <button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button>
+      <button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button>
+      <button data-tab="logs" class="${state.tab === 'logs' ? 'active' : ''}">Logs</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div>
+      <button class="sign-out-link" id="admin-sign-out">Sign out</button>
+    </div>
+  </aside><main class="main">${content}</main>`;
 }
 
-function renderShell(content) {
-  app.innerHTML = `<aside class="sidebar"><p class="brand">HotShots<span>Admin</span></p><nav class="side-nav"><button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button><button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button></nav><div class="sidebar-foot"><div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div><button class="sign-out-link" id="admin-sign-out">Sign out</button></div></aside><main class="main">${content}</main>`;
+function renderSummary() {
+  if (!state.stats) return '<p>Loading stats...</p>';
+  const { users, paid, recipes, shared } = state.stats;
+
+  return `<h1>Summary</h1>
+    <p class="main-subtitle">Platform overview.</p>
+    <div class="stat-strip">
+      <div class="stat-box"><strong>${users}</strong><span>Total Users</span></div>
+      <div class="stat-box"><strong>${paid}</strong><span>Paid Users</span></div>
+      <div class="stat-box"><strong>${recipes}</strong><span>Total Recipes</span></div>
+      <div class="stat-box"><strong>${shared}</strong><span>Shared Recipes</span></div>
+    </div>
+    <h2 style="font-size: 16px; margin: 30px 0 16px;">Recent Activity</h2>
+    <div class="table-card">
+      ${state.logs.slice(0, 5).map(log => `
+        <div style="padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 12px;">
+          <span style="color: var(--muted); font-size: 12px; min-width: 60px;">${formatTime(log.time)}</span>
+          <div>
+            <div style="font-size: 13px; font-weight: 600;">${escapeHtml(log.message)}</div>
+            <div style="font-size: 11px; color: var(--muted);">${escapeHtml(log.detail)}</div>
+          </div>
+        </div>
+      `).join('') || '<div style="padding: 20px; text-align: center; color: var(--muted);">No recent activity.</div>'}
+    </div>`;
 }
 
 function renderUsers() {
   const search = state.userSearch.trim().toLowerCase();
   const rows = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
-  renderShell(`<h1>Users</h1><p class="main-subtitle">Manage users.</p>${statStrip()}<div class="toolbar"><input type="search" id="user-search" placeholder="Search..." value="${escapeHtml(state.userSearch)}"></div><div class="table-card"><table><thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>${rows.length ? rows.map(u => `<tr data-user-row="${u.id}"><td class="name-cell"><strong>${escapeHtml(u.display_name)}</strong><small>${escapeHtml(u.email)}</small></td><td><span class="badge plan-${u.subscription_plan}">${u.subscription_plan}</span></td><td><span class="badge status-${u.subscription_status}">${u.subscription_status}</span></td><td>${formatDate(u.created_at)}</td><td><div class="row-actions"><select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select><select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select><button class="icon-button save" data-save-user="${u.id}">Save</button></div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users found.</td></tr>'}</tbody></table></div>`);
+  
+  return `<h1>Users</h1><p class="main-subtitle">Manage user plans and status.</p>
+    <div class="toolbar"><input type="search" id="user-search" placeholder="Search..." value="${escapeHtml(state.userSearch)}"></div>
+    <div class="table-card"><table><thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>
+    ${rows.length ? rows.map(u => `<tr data-user-row="${u.id}">
+      <td class="name-cell"><strong>${escapeHtml(u.display_name)}</strong><small>${escapeHtml(u.email)}</small></td>
+      <td><span class="badge plan-${u.subscription_plan}">${u.subscription_plan}</span></td>
+      <td><span class="badge status-${u.subscription_status}">${u.subscription_status}</span></td>
+      <td>${formatDate(u.created_at)}</td>
+      <td><div class="row-actions">
+        <select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
+        <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
+        <button class="icon-button save" data-save-user="${u.id}">Save</button>
+      </div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users found.</td></tr>'}
+    </tbody></table></div>`;
 }
 
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
   const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search));
-  renderShell(`<h1>Recipes</h1><p class="main-subtitle">Manage recipes.</p>${statStrip()}<div class="toolbar"><input type="search" id="recipe-search" placeholder="Search..." value="${escapeHtml(state.recipeSearch)}"></div><div class="table-card"><table><thead><tr><th>Recipe</th><th>Category</th><th>Visibility</th><th>Actions</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td class="name-cell"><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.category)}</td><td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td><td><div class="row-actions"><button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button><button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button></div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="4">No recipes found.</td></tr>'}</tbody></table></div>`);
+  
+  return `<h1>Recipes</h1><p class="main-subtitle">Manage recipe visibility.</p>
+    <div class="toolbar"><input type="search" id="recipe-search" placeholder="Search..." value="${escapeHtml(state.recipeSearch)}"></div>
+    <div class="table-card"><table><thead><tr><th>Recipe</th><th>Category</th><th>Visibility</th><th>Actions</th></tr></thead><tbody>
+    ${rows.length ? rows.map(r => `<tr>
+      <td class="name-cell"><strong>${escapeHtml(r.name)}</strong></td>
+      <td>${escapeHtml(r.category)}</td>
+      <td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td>
+      <td><div class="row-actions">
+        <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
+        <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
+      </div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="4">No recipes found.</td></tr>'}
+    </tbody></table></div>`;
+}
+
+function renderLogs() {
+  return `<h1>Logs</h1><p class="main-subtitle">System activity and changes.</p>
+    <div class="table-card">
+      ${state.logs.length ? state.logs.map(log => `
+        <div style="padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 12px;">
+          <span style="color: var(--muted); font-size: 12px; min-width: 60px;">${formatTime(log.time)}</span>
+          <div>
+            <div style="font-size: 13px; font-weight: 600;"><span class="badge ${log.type === 'db' ? 'plan-plus' : 'plan-free'}" style="margin-right: 8px;">${log.label}</span> ${escapeHtml(log.message)}</div>
+            <div style="font-size: 11px; color: var(--muted); margin-top: 2px;">${escapeHtml(log.detail)}</div>
+          </div>
+        </div>
+      `).join('') : '<div style="padding: 30px; text-align: center; color: var(--muted);">No logs available.</div>'}
+    </div>`;
 }
 
 function render() {
   if (!state.session) return renderAuth();
-  if (!state.authChecked) { app.innerHTML = '<div class="auth-shell"><p>Checking...</p></div>'; return; }
+  if (!state.authChecked) { app.innerHTML = '<div class="auth-shell"><p>Checking access...</p></div>'; return; }
   if (!state.adminProfile?.is_admin) return renderLocked();
-  if (state.loading && !state.stats) { app.innerHTML = '<div class="auth-shell"><p>Loading...</p></div>'; return; }
-  return state.tab === 'recipes' ? renderRecipes() : renderUsers();
+  if (state.loading && !state.stats) { app.innerHTML = '<div class="auth-shell"><p>Loading dashboard...</p></div>'; return; }
+
+  let content = '';
+  if (state.tab === 'summary') content = renderSummary();
+  else if (state.tab === 'users') content = renderUsers();
+  else if (state.tab === 'recipes') content = renderRecipes();
+  else if (state.tab === 'logs') content = renderLogs();
+  else content = renderSummary();
+  
+  renderShell(content);
 }
 
 document.addEventListener('click', event => {
@@ -122,7 +202,7 @@ document.addEventListener('click', event => {
     const plan = row.querySelector('[data-field="subscription_plan"]').value;
     const status = row.querySelector('[data-field="subscription_status"]').value;
     authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) })
-      .then(() => { showToast('Updated'); loadAll(); })
+      .then(() => { showToast('User updated'); loadAll(); })
       .catch(err => showToast(err.message));
     return;
   }
@@ -132,7 +212,7 @@ document.addEventListener('click', event => {
     const id = toggle.dataset.toggleShared;
     const next = toggle.dataset.currentlyShared !== 'true';
     authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_shared: next }) })
-      .then(() => { showToast('Updated'); loadAll(); })
+      .then(() => { showToast('Recipe updated'); loadAll(); })
       .catch(err => showToast(err.message));
     return;
   }
@@ -140,9 +220,9 @@ document.addEventListener('click', event => {
   const del = event.target.closest('[data-delete-recipe]');
   if (del) {
     const id = del.dataset.deleteRecipe;
-    if (!confirm('Delete?')) return;
+    if (!window.confirm('Delete this recipe?')) return;
     authFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' })
-      .then(() => { showToast('Deleted'); loadAll(); })
+      .then(() => { showToast('Recipe deleted'); loadAll(); })
       .catch(err => showToast(err.message));
   }
 });
@@ -152,7 +232,7 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   const form = new FormData(event.target);
   state.authError = '';
-  supabase.auth.signInWithPassword({ email: form.get('email'), password: form.get('password') })
+  supabase.auth.signInWithPassword({ email: form.get('email').trim(), password: form.get('password') })
     .then(({ error }) => { if (error) { state.authError = error.message; render(); } });
 });
 
@@ -173,7 +253,8 @@ supabase.auth.onAuthStateChange(async (e, session) => {
     state.users = [];
     state.recipes = [];
     state.stats = null;
-    state.tab = 'users';
+    state.logs = [];
+    state.tab = 'summary';
     render();
   }
 });
