@@ -44,11 +44,18 @@ async function loadAll() {
   state.loading = true; render();
   try {
     const [{ users }, { recipes }, stats] = await Promise.all([
-      authFetch('/api/admin/users'), authFetch('/api/admin/recipes'), authFetch('/api/admin/stats')
+      authFetch('/api/admin/users'), 
+      authFetch('/api/admin/recipes'), 
+      authFetch('/api/admin/stats')
     ]);
-    state.users = users; state.recipes = recipes; state.stats = stats;
-  } catch (err) { showToast(err.message); }
-  state.loading = false; render();
+    state.users = users; 
+    state.recipes = recipes; 
+    state.stats = stats;
+  } catch (err) { 
+    showToast(err.message); 
+  }
+  state.loading = false; 
+  render();
 }
 
 function renderAuth() {
@@ -62,8 +69,10 @@ function renderLocked() {
 function statStrip() {
   if (!state.stats) return '';
   const items = [
-    { label: 'Users', value: state.stats.users }, { label: 'Recipes', value: state.stats.recipes },
-    { label: 'Shared', value: state.stats.shared }, { label: 'Paid plans', value: state.stats.paid }
+    { label: 'Users', value: state.stats.users }, 
+    { label: 'Recipes', value: state.stats.recipes },
+    { label: 'Shared', value: state.stats.shared }, 
+    { label: 'Paid plans', value: state.stats.paid }
   ];
   return `<div class="stat-strip">${items.map(i => `<div class="stat-box"><strong>${i.value}</strong><span>${i.label}</span></div>`).join('')}</div>`;
 }
@@ -86,9 +95,10 @@ function renderShell(content) {
 function renderUsers() {
   const search = state.userSearch.trim().toLowerCase();
   const rows = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
+  
   renderShell(`
     <h1>Users</h1>
-    <p class="main-subtitle">Everyone with a HotShots account. Override plan or status here for support, comps, or refunds.</p>
+    <p class="main-subtitle">Everyone with a HotShots account. Override plan or status here.</p>
     ${statStrip()}
     <div class="toolbar"><input type="search" id="user-search" placeholder="Search by name or email" value="${escapeHtml(state.userSearch)}"></div>
     <div class="table-card"><table>
@@ -105,49 +115,63 @@ function renderUsers() {
               <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
               <button class="icon-button save" data-save-user="${u.id}">Save</button>
             </div></td>
-          </tr>`).join('') : `<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>`}
+          </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>'}
       </tbody>
     </table></div>`);
 }
 
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
-  const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search) || r.author?.display_name?.toLowerCase().includes(search) || r.author?.email?.toLowerCase().includes(search));
+  const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search) || r.author?.display_name?.toLowerCase().includes(search));
+  
   renderShell(`
     <h1>Recipes</h1>
-    <p class="main-subtitle">Every recipe across the app, shared or private. Hide a recipe from Explore or remove it entirely.</p>
+    <p class="main-subtitle">Every recipe across the app, shared or private.</p>
     ${statStrip()}
     <div class="toolbar"><input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}"></div>
     <div class="table-card"><table>
-      <thead><tr><th>Recipe</th><th>Author</th><th>Rating</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>
         ${rows.length ? rows.map(r => `
           <tr>
             <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category)}</small></td>
-            <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong><small>${escapeHtml(r.author?.email || '')}</small></td>
-            <td>${r.rating?.count ? `${(r.rating.total / r.rating.count).toFixed(1)} (${r.rating.count})` : '—'}</td>
+            <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong></td>
             <td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td>
             <td>${formatDate(r.created_at)}</td>
             <td><div class="row-actions">
               <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
               <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
             </div></td>
-          </tr>`).join('') : `<tr class="empty-row"><td colspan="6">No recipes match that search.</td></tr>`}
+          </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No recipes match that search.</td></tr>'}
       </tbody>
     </table></div>`);
 }
 
 function render() {
   if (!state.session) return renderAuth();
-  if (!state.authChecked) { app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Checking access…</p></div>'; return; }
+  if (!state.authChecked) { 
+    app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Checking access…</p></div>'; 
+    return; 
+  }
   if (!state.adminProfile?.is_admin) return renderLocked();
-  if (state.loading && !state.stats) { app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Loading dashboard…</p></div>'; return; }
+  if (state.loading && !state.stats) { 
+    app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Loading dashboard…</p></div>'; 
+    return; 
+  }
   return state.tab === 'recipes' ? renderRecipes() : renderUsers();
 }
 
 document.addEventListener('click', event => {
-  const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; return render(); }
-  if (event.target.closest('#admin-sign-out')) return supabase.auth.signOut();
+  const tab = event.target.closest('[data-tab]');
+  if (tab) { 
+    state.tab = tab.dataset.tab; 
+    return render(); 
+  }
+  
+  if (event.target.closest('#admin-sign-out')) {
+    supabase.auth.signOut();
+    return;
+  }
 
   const saveUser = event.target.closest('[data-save-user]');
   if (saveUser) {
@@ -155,9 +179,16 @@ document.addEventListener('click', event => {
     const row = saveUser.closest('[data-user-row]');
     const plan = row.querySelector('[data-field="subscription_plan"]').value;
     const status = row.querySelector('[data-field="subscription_status"]').value;
-    authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) })
-      .then(({ user }) => { state.users = state.users.map(u => u.id === id ? { ...u, ...user } : u); render(); showToast(`Updated ${user.display_name || user.email}`); })
-      .catch(err => showToast(err.message));
+    authFetch(`/api/admin/users/${id}`, { 
+      method: 'PATCH', 
+      body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) 
+    })
+    .then(({ user }) => { 
+      state.users = state.users.map(u => u.id === id ? { ...u, ...user } : u); 
+      render(); 
+      showToast('Updated user'); 
+    })
+    .catch(err => showToast(err.message));
     return;
   }
 
@@ -165,20 +196,30 @@ document.addEventListener('click', event => {
   if (toggle) {
     const id = toggle.dataset.toggleShared;
     const nextShared = toggle.dataset.currentlyShared !== 'true';
-    authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_shared: nextShared }) })
-      .then(({ recipe }) => { state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: recipe.is_shared } : r); render(); showToast(nextShared ? 'Recipe unhidden' : 'Recipe hidden from Explore'); })
-      .catch(err => showToast(err.message));
+    authFetch(`/api/admin/recipes/${id}`, { 
+      method: 'PATCH', 
+      body: JSON.stringify({ is_shared: nextShared }) 
+    })
+    .then(() => { 
+      state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: nextShared } : r); 
+      render(); 
+      showToast('Recipe updated'); 
+    })
+    .catch(err => showToast(err.message));
     return;
   }
 
   const del = event.target.closest('[data-delete-recipe]');
   if (del) {
     const id = del.dataset.deleteRecipe;
-    const recipe = state.recipes.find(r => r.id === id);
-    if (!window.confirm(`Permanently delete "${recipe?.name}"? This can't be undone.`)) return;
+    if (!window.confirm('Delete this recipe?')) return;
     authFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' })
-      .then(() => { state.recipes = state.recipes.filter(r => r.id !== id); render(); showToast('Recipe deleted'); })
-      .catch(err => showToast(err.message));
+    .then(() => { 
+      state.recipes = state.recipes.filter(r => r.id !== id); 
+      render(); 
+      showToast('Recipe deleted'); 
+    })
+    .catch(err => showToast(err.message));
     return;
   }
 });
@@ -188,13 +229,27 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   const form = new FormData(event.target);
   state.authError = '';
-  supabase.auth.signInWithPassword({ email: form.get('email').trim(), password: form.get('password') })
-    .then(({ error }) => { if (error) { state.authError = error.message; render(); } });
+  supabase.auth.signInWithPassword({ 
+    email: form.get('email').trim(), 
+    password: form.get('password') 
+  })
+  .then(({ error }) => { 
+    if (error) { 
+      state.authError = error.message; 
+      render(); 
+    } 
+  });
 });
 
 document.addEventListener('input', event => {
-  if (event.target.id === 'user-search') { state.userSearch = event.target.value; return renderUsers(); }
-  if (event.target.id === 'recipe-search') { state.recipeSearch = event.target.value; return renderRecipes(); }
+  if (event.target.id === 'user-search') { 
+    state.userSearch = event.target.value; 
+    return renderUsers(); 
+  }
+  if (event.target.id === 'recipe-search') { 
+    state.recipeSearch = event.target.value; 
+    return renderRecipes(); 
+  }
 });
 
 supabase.auth.onAuthStateChange(async (_event, newSession) => {
@@ -203,9 +258,21 @@ supabase.auth.onAuthStateChange(async (_event, newSession) => {
   if (newSession && !wasSignedIn) {
     render();
     await checkAdmin();
-    if (state.adminProfile?.is_admin) await loadAll(); else render();
+    if (state.adminProfile?.is_admin) {
+      await loadAll(); 
+    } else {
+      render(); 
+    }
   }
-  if (!newSession) { state.adminProfile = null; state.authChecked = false; state.users = []; state.recipes = []; state.stats = null; state.tab = 'users'; render(); }
+  if (!newSession) { 
+    state.adminProfile = null; 
+    state.authChecked = false; 
+    state.users = []; 
+    state.recipes = []; 
+    state.stats = null; 
+    state.tab = 'users'; 
+    render(); 
+  }
 });
 
 render();
