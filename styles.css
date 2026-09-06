@@ -11,7 +11,6 @@ button { cursor: pointer; border: 0; background: none; }
 input, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--ink); }
 
 #app { display: flex; min-height: 100vh; }
-
 .sidebar { display: flex; flex-direction: column; width: 210px; flex: none; padding: 22px 14px; border-right: 1px solid var(--line); background: var(--panel); }
 .brand { margin: 0 0 26px; padding: 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
 .brand span { color: var(--acid); }
