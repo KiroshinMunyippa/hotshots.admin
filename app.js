@@ -5,29 +5,19 @@ const supabase = createClient(SUPABASE_ACCOUNTS_URL, SUPABASE_ACCOUNTS_ANON_KEY)
 const app = document.getElementById('app');
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[char]);
-
-const showToast = (message) => {
-  const toast = document.getElementById('toast');
-  toast.textContent = message;
-  toast.classList.add('show');
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => toast.classList.remove('show'), 2600);
+const showToast = (message) => { 
+  const toast = document.getElementById('toast'); 
+  toast.textContent = message; 
+  toast.classList.add('show'); 
+  clearTimeout(showToast.timer); 
+  showToast.timer = setTimeout(() => toast.classList.remove('show'), 2600); 
 };
-
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
 const state = {
-  session: null,
-  adminProfile: null,
-  authChecked: false,
-  authError: '',
-  tab: 'users',
-  users: [],
-  recipes: [],
-  stats: null,
-  userSearch: '',
-  recipeSearch: '',
-  loading: false
+  session: null, adminProfile: null, authChecked: false, authError: '',
+  tab: 'users', users: [], recipes: [], stats: null,
+  userSearch: '', recipeSearch: '', loading: false
 };
 
 async function authFetch(path, options = {}) {
@@ -49,70 +39,112 @@ async function checkAdmin() {
 }
 
 async function loadAll() {
-  state.loading = true;
-  render();
+  state.loading = true; render();
   try {
     const [{ users }, { recipes }, stats] = await Promise.all([
-      authFetch('/api/admin/users'),
-      authFetch('/api/admin/recipes'),
-      authFetch('/api/admin/stats')
+      authFetch('/api/admin/users'), authFetch('/api/admin/recipes'), authFetch('/api/admin/stats')
     ]);
-    state.users = users;
-    state.recipes = recipes;
-    state.stats = stats;
-  } catch (err) {
-    showToast(err.message);
-  }
-  state.loading = false;
-  render();
+    state.users = users; state.recipes = recipes; state.stats = stats;
+  } catch (err) { showToast(err.message); }
+  state.loading = false; render();
 }
 
 function renderAuth() {
-  app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>HotShots Admin</h1><p>Sign in with an account flagged as an administrator.</p><form id="admin-login"><div class="field"><label for="admin-email">Email</label><input id="admin-email" name="email" type="email" required></div><div class="field"><label for="admin-password">Password</label><input id="admin-password" name="password" type="password" required></div>${state.authError ? `<p class="auth-error">${escapeHtml(state.authError)}</p>` : ''}<button class="primary-button" type="submit">Sign in</button></form></div></div>`;
+  app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>HotShots Admin</h1><p>Sign in with an account flagged as an administrator.</p><form id="admin-login"><div class="field"><label for="admin-email">Email</label><input id="admin-email" name="email" type="email" required autocomplete="email"></div><div class="field"><label for="admin-password">Password</label><input id="admin-password" name="password" type="password" required autocomplete="current-password"></div>${state.authError ? `<p class="auth-error">${escapeHtml(state.authError)}</p>` : ''}<button class="primary-button" type="submit">Sign in</button></form></div></div>`;
 }
 
 function renderLocked() {
-  app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>Not an admin account</h1><p>${escapeHtml(state.adminProfile?.email || 'This account')} isn't flagged as an administrator.</p><button class="primary-button" id="admin-sign-out" type="button">Sign out</button></div></div>`;
+  app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>Not an admin account</h1><p>${escapeHtml(state.adminProfile?.email || state.session?.user?.email || 'This account')} isn't flagged as an administrator.</p><button class="primary-button" id="admin-sign-out" type="button">Sign out</button></div></div>`;
 }
 
 function statStrip() {
   if (!state.stats) return '';
   const items = [
-    { label: 'Users', value: state.stats.users },
-    { label: 'Recipes', value: state.stats.recipes },
-    { label: 'Shared', value: state.stats.shared },
-    { label: 'Paid plans', value: state.stats.paid }
+    { label: 'Users', value: state.stats.users }, { label: 'Recipes', value: state.stats.recipes },
+    { label: 'Shared', value: state.stats.shared }, { label: 'Paid plans', value: state.stats.paid }
   ];
   return `<div class="stat-strip">${items.map(i => `<div class="stat-box"><strong>${i.value}</strong><span>${i.label}</span></div>`).join('')}</div>`;
 }
 
 function renderShell(content) {
-  app.innerHTML = `<aside class="sidebar"><p class="brand">HotShots<span>Admin</span></p><nav class="side-nav"><button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button><button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button></nav><div class="sidebar-foot"><div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div><button class="sign-out-link" id="admin-sign-out">Sign out</button></div></aside><main class="main">${content}</main>`;
+  app.innerHTML = `<aside class="sidebar">
+    <p class="brand">HotShots<span>Admin</span></p>
+    <nav class="side-nav">
+      <button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button>
+      <button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div>
+      <button class="sign-out-link" id="admin-sign-out">Sign out</button>
+    </div>
+  </aside>
+  <main class="main">${content}</main>`;
 }
 
 function renderUsers() {
   const search = state.userSearch.trim().toLowerCase();
   const rows = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
-  renderShell(`<h1>Users</h1><p class="main-subtitle">Manage users.</p>${statStrip()}<div class="toolbar"><input type="search" id="user-search" placeholder="Search..." value="${escapeHtml(state.userSearch)}"></div><div class="table-card"><table><thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody>${rows.length ? rows.map(u => `<tr data-user-row="${u.id}"><td class="name-cell"><strong>${escapeHtml(u.display_name)}</strong><small>${escapeHtml(u.email)}</small></td><td><span class="badge plan-${u.subscription_plan}">${u.subscription_plan}</span></td><td><span class="badge status-${u.subscription_status}">${u.subscription_status}</span></td><td>${formatDate(u.created_at)}</td><td><div class="row-actions"><select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select><select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select><button class="icon-button save" data-save-user="${u.id}">Save</button></div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users found.</td></tr>'}</tbody></table></div>`);
+  renderShell(`
+    <h1>Users</h1>
+    <p class="main-subtitle">Everyone with a HotShots account. Override plan or status here for support, comps, or refunds.</p>
+    ${statStrip()}
+    <div class="toolbar"><input type="search" id="user-search" placeholder="Search by name or email" value="${escapeHtml(state.userSearch)}"></div>
+    <div class="table-card"><table>
+      <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Update</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(u => `
+          <tr data-user-row="${u.id}">
+            <td class="name-cell"><strong>${escapeHtml(u.display_name)}</strong><small>${escapeHtml(u.email)}</small></td>
+            <td><span class="badge plan-${u.subscription_plan}">${escapeHtml(u.subscription_plan)}</span></td>
+            <td><span class="badge status-${u.subscription_status}">${escapeHtml(u.subscription_status)}</span></td>
+            <td>${formatDate(u.created_at)}</td>
+            <td><div class="row-actions">
+              <select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
+              <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
+              <button class="icon-button save" data-save-user="${u.id}">Save</button>
+            </div></td>
+          </tr>`).join('') : `<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>`}
+      </tbody>
+    </table></div>`);
 }
 
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
-  const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search));
-  renderShell(`<h1>Recipes</h1><p class="main-subtitle">Manage recipes.</p>${statStrip()}<div class="toolbar"><input type="search" id="recipe-search" placeholder="Search..." value="${escapeHtml(state.recipeSearch)}"></div><div class="table-card"><table><thead><tr><th>Recipe</th><th>Category</th><th>Visibility</th><th>Actions</th></tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td class="name-cell"><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.category)}</td><td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td><td><div class="row-actions"><button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button><button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button></div></td></tr>`).join('') : '<tr class="empty-row"><td colspan="4">No recipes found.</td></tr>'}</tbody></table></div>`);
+  const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search) || r.author?.display_name?.toLowerCase().includes(search) || r.author?.email?.toLowerCase().includes(search));
+  renderShell(`
+    <h1>Recipes</h1>
+    <p class="main-subtitle">Every recipe across the app, shared or private. Hide a recipe from Explore or remove it entirely.</p>
+    ${statStrip()}
+    <div class="toolbar"><input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}"></div>
+    <div class="table-card"><table>
+      <thead><tr><th>Recipe</th><th>Author</th><th>Rating</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(r => `
+          <tr>
+            <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category)}</small></td>
+            <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong><small>${escapeHtml(r.author?.email || '')}</small></td>
+            <td>${r.rating?.count ? `${(r.rating.total / r.rating.count).toFixed(1)} (${r.rating.count})` : '—'}</td>
+            <td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td>
+            <td>${formatDate(r.created_at)}</td>
+            <td><div class="row-actions">
+              <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
+              <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
+            </div></td>
+          </tr>`).join('') : `<tr class="empty-row"><td colspan="6">No recipes match that search.</td></tr>`}
+      </tbody>
+    </table></div>`);
 }
 
 function render() {
   if (!state.session) return renderAuth();
-  if (!state.authChecked) { app.innerHTML = '<div class="auth-shell"><p>Checking...</p></div>'; return; }
+  if (!state.authChecked) { app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Checking access…</p></div>'; return; }
   if (!state.adminProfile?.is_admin) return renderLocked();
-  if (state.loading && !state.stats) { app.innerHTML = '<div class="auth-shell"><p>Loading...</p></div>'; return; }
+  if (state.loading && !state.stats) { app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Loading dashboard…</p></div>'; return; }
   return state.tab === 'recipes' ? renderRecipes() : renderUsers();
 }
 
 document.addEventListener('click', event => {
-  const tab = event.target.closest('[data-tab]');
-  if (tab) { state.tab = tab.dataset.tab; return render(); }
+  const tab = event.target.closest('[data-tab]'); if (tab) { state.tab = tab.dataset.tab; return render(); }
   if (event.target.closest('#admin-sign-out')) return supabase.auth.signOut();
 
   const saveUser = event.target.closest('[data-save-user]');
@@ -122,7 +154,7 @@ document.addEventListener('click', event => {
     const plan = row.querySelector('[data-field="subscription_plan"]').value;
     const status = row.querySelector('[data-field="subscription_status"]').value;
     authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) })
-      .then(() => { showToast('Updated'); loadAll(); })
+      .then(({ user }) => { state.users = state.users.map(u => u.id === id ? { ...u, ...user } : u); render(); showToast(`Updated ${user.display_name || user.email}`); })
       .catch(err => showToast(err.message));
     return;
   }
@@ -130,9 +162,9 @@ document.addEventListener('click', event => {
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
-    const next = toggle.dataset.currentlyShared !== 'true';
-    authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_shared: next }) })
-      .then(() => { showToast('Updated'); loadAll(); })
+    const nextShared = toggle.dataset.currentlyShared !== 'true';
+    authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_shared: nextShared }) })
+      .then(({ recipe }) => { state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: recipe.is_shared } : r); render(); showToast(nextShared ? 'Recipe unhidden' : 'Recipe hidden from Explore'); })
       .catch(err => showToast(err.message));
     return;
   }
@@ -140,10 +172,12 @@ document.addEventListener('click', event => {
   const del = event.target.closest('[data-delete-recipe]');
   if (del) {
     const id = del.dataset.deleteRecipe;
-    if (!confirm('Delete?')) return;
+    const recipe = state.recipes.find(r => r.id === id);
+    if (!window.confirm(`Permanently delete "${recipe?.name}"? This can't be undone.`)) return;
     authFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' })
-      .then(() => { showToast('Deleted'); loadAll(); })
+      .then(() => { state.recipes = state.recipes.filter(r => r.id !== id); render(); showToast('Recipe deleted'); })
       .catch(err => showToast(err.message));
+    return;
   }
 });
 
@@ -152,30 +186,24 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   const form = new FormData(event.target);
   state.authError = '';
-  supabase.auth.signInWithPassword({ email: form.get('email'), password: form.get('password') })
+  supabase.auth.signInWithPassword({ email: form.get('email').trim(), password: form.get('password') })
     .then(({ error }) => { if (error) { state.authError = error.message; render(); } });
 });
 
 document.addEventListener('input', event => {
-  if (event.target.id === 'user-search') { state.userSearch = event.target.value; renderUsers(); }
-  if (event.target.id === 'recipe-search') { state.recipeSearch = event.target.value; renderRecipes(); }
+  if (event.target.id === 'user-search') { state.userSearch = event.target.value; return renderUsers(); }
+  if (event.target.id === 'recipe-search') { state.recipeSearch = event.target.value; return renderRecipes(); }
 });
 
-supabase.auth.onAuthStateChange(async (e, session) => {
-  state.session = session;
-  if (session) {
-    await checkAdmin();
-    if (state.adminProfile?.is_admin) loadAll();
-    else render();
-  } else {
-    state.adminProfile = null;
-    state.authChecked = false;
-    state.users = [];
-    state.recipes = [];
-    state.stats = null;
-    state.tab = 'users';
+supabase.auth.onAuthStateChange(async (_event, newSession) => {
+  const wasSignedIn = Boolean(state.session);
+  state.session = newSession;
+  if (newSession && !wasSignedIn) {
     render();
+    await checkAdmin();
+    if (state.adminProfile?.is_admin) await loadAll(); else render();
   }
+  if (!newSession) { state.adminProfile = null; state.authChecked = false; state.users = []; state.recipes = []; state.stats = null; state.tab = 'users'; render(); }
 });
 
 render();
