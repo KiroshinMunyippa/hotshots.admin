@@ -16,28 +16,6 @@ const showToast = (message) => {
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
-function exportToCSV(data, filename) {
-  if (!data || !data.length) { showToast('No data to export'); return; }
-  const headers = Object.keys(data[0]);
-  const csvRows = [];
-  csvRows.push(headers.join(','));
-  for (const row of data) {
-    const values = headers.map(header => {
-      const escaped = ('' + (row[header] ?? '')).replace(/"/g, '""');
-      return `"${escaped}"`;
-    });
-    csvRows.push(values.join(','));
-  }
-  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.setAttribute('href', url);
-  a.setAttribute('download', filename);
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('Exported successfully');
-}
-
 const state = {
   session: null, adminProfile: null, authChecked: false, authError: '',
   tab: 'users', users: [], recipes: [], stats: null, analytics: null,
@@ -123,11 +101,10 @@ function renderUsers() {
   
   renderShell(`
     <h1>Users</h1>
-    <p class="main-subtitle">Everyone with a HotShots account. Override plan or status here.</p>
+    <p class="main-subtitle">Everyone with a HotShots account.</p>
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="user-search" placeholder="Search by name or email" value="${escapeHtml(state.userSearch)}">
-      <button class="icon-button" data-action="export-users">Export CSV</button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Update</th></tr></thead>
@@ -154,11 +131,10 @@ function renderRecipes() {
   
   renderShell(`
     <h1>Recipes</h1>
-    <p class="main-subtitle">Every recipe across the app, shared or private.</p>
+    <p class="main-subtitle">Every recipe across the app.</p>
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}">
-      <button class="icon-button" data-action="export-recipes">Export CSV</button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
@@ -248,23 +224,6 @@ document.addEventListener('click', event => {
   
   if (event.target.closest('#admin-sign-out')) {
     supabase.auth.signOut();
-    return;
-  }
-
-  if (event.target.closest('[data-action="export-users"]')) {
-    exportToCSV(state.users, 'hotshots-users.csv');
-    return;
-  }
-  if (event.target.closest('[data-action="export-recipes"]')) {
-    const cleanRecipes = state.recipes.map(r => ({
-      name: r.name,
-      category: r.category,
-      author_name: r.author?.display_name || 'Unknown',
-      author_email: r.author?.email || '',
-      is_shared: r.is_shared ? 'Yes' : 'No',
-      created_at: r.created_at
-    }));
-    exportToCSV(cleanRecipes, 'hotshots-recipes.csv');
     return;
   }
 
