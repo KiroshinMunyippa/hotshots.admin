@@ -581,3 +581,139 @@ td.name-cell small {
     grid-template-columns: 1fr;
   }
 }
+/* Summary Page - 2x2 Grid for main stats */
+.summary-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.summary-stat-card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-stat-card .stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  color: var(--ink);
+}
+
+.summary-stat-card .stat-label {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Logs Page - Timeline */
+.logs-container {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.log-item {
+  display: flex;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  min-width: 80px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-content {
+  flex: 1;
+}
+
+.log-event {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.log-detail {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.log-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-right: 8px;
+}
+
+.log-badge.db { background: rgba(215,250,89,.15); color: var(--acid); }
+.log-badge.user { background: rgba(154,163,152,.15); color: var(--muted); }
+.log-badge.auth { background: rgba(229,174,97,.15); color: var(--warn); }
+
+/* Database Info Page - Status List */
+.status-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  max-width: 600px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  gap: 16px;
+}
+
+.status-item:last-child {
+  border-bottom: none;
+}
+
+.status-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(215,250,89,.1);
+  color: var(--acid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.status-info {
+  flex: 1;
+}
+
+.status-name {
+  font-size: 14px;
+  font-weight: 600;
+  display: block;
+}
+
+.status-health {
+  font-size: 12px;
+  color: var(--muted);
+}
