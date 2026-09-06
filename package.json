@@ -1,0 +1,9 @@
+{
+  "name": "hotshots-admin",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4"
+  }
+}
