@@ -16,9 +16,31 @@ const showToast = (message) => {
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
+function exportToCSV(data, filename) {
+  if (!data || !data.length) { showToast('No data to export'); return; }
+  const headers = Object.keys(data[0]);
+  const csvRows = [];
+  csvRows.push(headers.join(','));
+  for (const row of data) {
+    const values = headers.map(header => {
+      const escaped = ('' + (row[header] ?? '')).replace(/"/g, '""');
+      return `"${escaped}"`;
+    });
+    csvRows.push(values.join(','));
+  }
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.setAttribute('href', url);
+  a.setAttribute('download', filename);
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Exported successfully');
+}
+
 const state = {
   session: null, adminProfile: null, authChecked: false, authError: '',
-  tab: 'users', users: [], recipes: [], stats: null, analytics: null,
+  tab: 'users', users: [], recipes: [], stats: null,
   userSearch: '', recipeSearch: '', loading: false
 };
 
@@ -43,16 +65,14 @@ async function checkAdmin() {
 async function loadAll() {
   state.loading = true; render();
   try {
-    const [{ users }, { recipes }, stats, analytics] = await Promise.all([
+    const [{ users }, { recipes }, stats] = await Promise.all([
       authFetch('/api/admin/users'), 
       authFetch('/api/admin/recipes'), 
-      authFetch('/api/admin/stats'),
-      authFetch('/api/admin/analytics')
+      authFetch('/api/admin/stats')
     ]);
     state.users = users; 
     state.recipes = recipes; 
     state.stats = stats;
-    state.analytics = analytics;
   } catch (err) { 
     showToast(err.message); 
   }
@@ -85,7 +105,6 @@ function renderShell(content) {
     <nav class="side-nav">
       <button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button>
       <button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button>
-      <button data-tab="analytics" class="${state.tab === 'analytics' ? 'active' : ''}">Analytics</button>
     </nav>
     <div class="sidebar-foot">
       <div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div>
@@ -105,6 +124,7 @@ function renderUsers() {
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="user-search" placeholder="Search by name or email" value="${escapeHtml(state.userSearch)}">
+      <button class="icon-button" data-action="export-users">Export CSV</button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Update</th></tr></thead>
@@ -135,6 +155,7 @@ function renderRecipes() {
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}">
+      <button class="icon-button" data-action="export-recipes">Export CSV</button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
@@ -154,50 +175,6 @@ function renderRecipes() {
     </table></div>`);
 }
 
-function renderAnalytics() {
-  if (!state.analytics) return '<p class="main-subtitle">Loading analytics...</p>';
-  const { totalUsers, recentSignups, planDist, catDist } = state.analytics;
-
-  const renderBar = (label, count, total, colorVar) => {
-    const pct = total > 0 ? (count / total) * 100 : 0;
-    return `
-      <div style="margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-          <span style="text-transform: capitalize;">${label}</span>
-          <span style="color: var(--muted);">${count} (${pct.toFixed(1)}%)</span>
-        </div>
-        <div style="height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden;">
-          <div style="height: 100%; width: ${pct}%; background: var(${colorVar});"></div>
-        </div>
-      </div>
-    `;
-  };
-
-  const totalRecipes = Object.values(catDist).reduce((a, b) => a + b, 0);
-
-  return `
-    <h1>Analytics</h1>
-    <p class="main-subtitle">Overview of app growth and usage.</p>
-    <div class="stat-strip">
-      <div class="stat-box"><strong>${totalUsers}</strong><span>Total Users</span></div>
-      <div class="stat-box"><strong>${recentSignups}</strong><span>Signups (30d)</span></div>
-      <div class="stat-box"><strong>${Object.keys(catDist).length}</strong><span>Active Categories</span></div>
-      <div class="stat-box"><strong>${state.stats?.shared || 0}</strong><span>Shared Recipes</span></div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-      <div class="table-card" style="padding: 20px;">
-        <h3 style="margin: 0 0 16px; font-size: 14px;">Plan Distribution</h3>
-        ${Object.entries(planDist).map(([plan, count]) => renderBar(plan, count, totalUsers, '--acid')).join('')}
-      </div>
-      <div class="table-card" style="padding: 20px;">
-        <h3 style="margin: 0 0 16px; font-size: 14px;">Recipe Categories</h3>
-        ${Object.entries(catDist).map(([cat, count]) => renderBar(cat, count, totalRecipes, '--warn')).join('')}
-      </div>
-    </div>
-  `;
-}
-
 function render() {
   if (!state.session) return renderAuth();
   if (!state.authChecked) { 
@@ -209,10 +186,7 @@ function render() {
     app.innerHTML = '<div class="auth-shell"><p class="main-subtitle">Loading dashboard…</p></div>'; 
     return; 
   }
-  
-  if (state.tab === 'analytics') return renderAnalytics();
-  if (state.tab === 'recipes') return renderRecipes();
-  return renderUsers();
+  return state.tab === 'recipes' ? renderRecipes() : renderUsers();
 }
 
 document.addEventListener('click', event => {
@@ -224,6 +198,23 @@ document.addEventListener('click', event => {
   
   if (event.target.closest('#admin-sign-out')) {
     supabase.auth.signOut();
+    return;
+  }
+
+  if (event.target.closest('[data-action="export-users"]')) {
+    exportToCSV(state.users, 'hotshots-users.csv');
+    return;
+  }
+  if (event.target.closest('[data-action="export-recipes"]')) {
+    const cleanRecipes = state.recipes.map(r => ({
+      name: r.name,
+      category: r.category,
+      author_name: r.author?.display_name || 'Unknown',
+      author_email: r.author?.email || '',
+      is_shared: r.is_shared ? 'Yes' : 'No',
+      created_at: r.created_at
+    }));
+    exportToCSV(cleanRecipes, 'hotshots-recipes.csv');
     return;
   }
 
@@ -324,7 +315,6 @@ supabase.auth.onAuthStateChange(async (_event, newSession) => {
     state.users = []; 
     state.recipes = []; 
     state.stats = null; 
-    state.analytics = null;
     state.tab = 'users'; 
     render(); 
   }
