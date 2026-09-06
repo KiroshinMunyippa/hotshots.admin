@@ -5,6 +5,7 @@ const supabase = createClient(SUPABASE_ACCOUNTS_URL, SUPABASE_ACCOUNTS_ANON_KEY)
 const app = document.getElementById('app');
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' })[char]);
+
 const showToast = (message) => { 
   const toast = document.getElementById('toast'); 
   toast.textContent = message; 
@@ -12,6 +13,7 @@ const showToast = (message) => {
   clearTimeout(showToast.timer); 
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2600); 
 };
+
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
 const state = {
