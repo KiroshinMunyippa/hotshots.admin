@@ -11,14 +11,54 @@ export default async function handler(req, res) {
   );
 
   try {
-    const { data: logs, error } = await accounts
+    // 1. Fetch recent audit logs (DB changes)
+    const { data: auditLogs, error: auditError } = await accounts
       .from('audit_logs')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(20);
 
-    if (error) throw error;
-    res.status(200).json(logs || []);
+    // 2. Fetch recent new accounts
+    const { data: newProfiles, error: profileError } = await accounts
+      .from('profiles')
+      .select('id, display_name, email, created_at')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (auditError) throw auditError;
+    if (profileError) throw profileError;
+
+    // 3. Merge and sort by date
+    const events = [];
+
+    if (auditLogs) {
+      auditLogs.forEach(log => {
+        events.push({
+          type: 'db',
+          label: 'Database Change',
+          message: `${log.action} on ${log.target_type}`,
+          detail: log.admin_email || 'System',
+          time: log.created_at
+        });
+      });
+    }
+
+    if (newProfiles) {
+      newProfiles.forEach(profile => {
+        events.push({
+          type: 'user',
+          label: 'New Account',
+          message: `${profile.display_name} joined`,
+          detail: profile.email,
+          time: profile.created_at
+        });
+      });
+    }
+
+    // Sort by time descending
+    events.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    res.status(200).json(events.slice(0, 30)); // Return top 30 recent events
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
