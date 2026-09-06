@@ -1,39 +1,43 @@
-async function logAudit(accounts, adminId, adminEmail, action, targetType, targetId, details) {
-  await accounts.from('audit_logs').insert({
-    admin_id: adminId,
-    admin_email: adminEmail,
-    action,
-    target_type: targetType,
-    target_id: targetId,
-    details
-  });
-}
-
-import { verifyAdmin } from '../../../lib/verifyAdmin.js';
-import { appData } from '../../../lib/appData.js';
+import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
-  const admin = await verifyAdmin(req);
-  if (!admin) return res.status(403).json({ error: 'Admin access required' });
-  const id = req.query.id;
-
-  if (req.method === 'PATCH') {
-    const { shared } = req.body || {};
-    if (typeof shared !== 'boolean') return res.status(400).json({ error: '"shared" must be true or false' });
-    const { data, error } = await appData.from('recipes').update({ is_shared: shared, updated_at: new Date().toISOString() }).eq('id', id).select().single();
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ recipe: data });
-    await logAudit(accounts, adminUser.id, adminUser.email, 'update_user', 'user', id, { subscription_plan, subscription_status });
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (req.method === 'DELETE') {
-    // recipe_ingredients, recipe_instructions, and recipe_ratings all cascade
-    // on delete (see db/appdata-schema.sql), so this one delete is enough.
-    const { error } = await appData.from('recipes').delete().eq('id', id);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(204).end();
-  }
+  const supabase = createClient(
+    process.env.SUPABASE_APPDATA_URL,
+    process.env.SUPABASE_APPDATA_SERVICE_KEY
+  );
 
-  res.setHeader('Allow', 'PATCH, DELETE');
-  return res.status(405).end();
+  try {
+    const { data: recipes, error } = await supabase
+      .from('recipes')
+      .select(`
+        *,
+        author:profiles!recipes_author_id (
+          display_name,
+          email
+        ),
+        rating:recipe_ratings (
+          rating
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    // Calculate rating totals
+    const recipesWithRatings = recipes.map(recipe => ({
+      ...recipe,
+      rating: {
+        total: recipe.rating?.reduce((sum, r) => sum + r.rating, 0) || 0,
+        count: recipe.rating?.length || 0
+      }
+    }));
+
+    res.status(200).json({ recipes: recipesWithRatings });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 }
