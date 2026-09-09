@@ -18,7 +18,10 @@ const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { 
 
 const state = {
   session: null, adminProfile: null, authChecked: false, authError: '',
-  tab: 'users', users: [], recipes: [], stats: null, analytics: null,
+  tab: 'users', 
+  users: [], recipes: [], stats: null, analytics: null,
+  // NEW: Add state for the new tabs
+  moderation: [], audit: [], settings: null, 
   userSearch: '', recipeSearch: '', loading: false
 };
 
@@ -86,6 +89,10 @@ function renderShell(content) {
       <button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button>
       <button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button>
       <button data-tab="analytics" class="${state.tab === 'analytics' ? 'active' : ''}">Analytics</button>
+      <!-- NEW TABS ADDED HERE -->
+      <button data-tab="moderation" class="${state.tab === 'moderation' ? 'active' : ''}">Moderation</button>
+      <button data-tab="audit" class="${state.tab === 'audit' ? 'active' : ''}">Audit Log</button>
+      <button data-tab="settings" class="${state.tab === 'settings' ? 'active' : ''}">Settings</button>
     </nav>
     <div class="sidebar-foot">
       <div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div>
@@ -216,6 +223,11 @@ function render() {
     return; 
   }
   
+  // NEW: Add placeholders for the new tabs
+  if (state.tab === 'settings') return renderShell('<h1>Settings</h1><p class="main-subtitle">App configuration coming soon.</p>');
+  if (state.tab === 'audit') return renderShell('<h1>Audit Log</h1><p class="main-subtitle">Admin activity tracking coming soon.</p>');
+  if (state.tab === 'moderation') return renderShell('<h1>Moderation</h1><p class="main-subtitle">Content moderation tools coming soon.</p>');
+
   if (state.tab === 'analytics') return renderAnalytics();
   if (state.tab === 'recipes') return renderRecipes();
   return renderUsers();
