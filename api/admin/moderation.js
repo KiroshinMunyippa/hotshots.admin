@@ -1,3 +1,4 @@
+import { logAudit } from '../../lib/logAudit.js';
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
@@ -30,14 +31,16 @@ export default async function handler(req, res) {
       }
       
       if (action === 'delete_recipe') {
-        // Delete the recipe, then mark the report as resolved
         if (recipeId) {
           await appdata.from('recipes').delete().eq('id', recipeId);
         }
         await appdata.from('recipe_reports').update({ status: 'resolved' }).eq('id', reportId);
+        
+        // 👇 ADD THIS LOGGING LINE 👇
+        await logAudit('Admin', 'Deleted Recipe', { recipeId: recipeId, reportId: reportId });
+        
         return res.status(200).json({ message: 'Recipe deleted and report resolved' });
       }
-
       return res.status(400).json({ error: 'Invalid action' });
     } catch (error) {
       return res.status(500).json({ error: error.message });
