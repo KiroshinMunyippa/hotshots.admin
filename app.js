@@ -112,6 +112,10 @@ function renderUsers() {
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="user-search" placeholder="Search by name or email" value="${escapeHtml(state.userSearch)}">
+      <!-- NEW EXPORT BUTTON -->
+      <button id="export-users-csv" style="margin-left: auto; padding: 8px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer;">
+        Download CSV
+      </button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Joined</th><th>Update</th></tr></thead>
