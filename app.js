@@ -352,4 +352,44 @@ supabase.auth.onAuthStateChange(async (_event, newSession) => {
   }
 });
 
+document.addEventListener('click', event => {
+  // ... keep your existing event listeners ...
+
+  // NEW: CSV Export Logic
+  if (event.target.id === 'export-users-csv') {
+    const search = state.userSearch.trim().toLowerCase();
+    const rowsToExport = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
+    
+    if (rowsToExport.length === 0) {
+      showToast('No users to export');
+      return;
+    }
+
+    // Create CSV headers and rows
+    const headers = ['ID', 'Display Name', 'Email', 'Plan', 'Status', 'Joined Date'];
+    const csvRows = rowsToExport.map(u => [
+      u.id, 
+      `"${u.display_name || ''}"`, // Quotes prevent commas in names from breaking CSV
+      `"${u.email || ''}"`, 
+      u.subscription_plan, 
+      u.subscription_status, 
+      u.created_at
+    ]);
+
+    const csvString = [headers.join(','), ...csvRows.map(row => row.join(','))].join('\n');
+    
+    // Trigger download
+    const blob = new Blob([csvString], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('hidden', '');
+    a.setAttribute('href', url);
+    a.setAttribute('download', 'hotshots_users.csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Users exported successfully');
+  }
+});
+
 render();
