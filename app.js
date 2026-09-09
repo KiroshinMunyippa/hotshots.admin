@@ -92,12 +92,14 @@ function renderShell(content) {
       <button data-tab="users" class="${state.tab === 'users' ? 'active' : ''}">Users</button>
       <button data-tab="recipes" class="${state.tab === 'recipes' ? 'active' : ''}">Recipes</button>
       <button data-tab="analytics" class="${state.tab === 'analytics' ? 'active' : ''}">Analytics</button>
-      <!-- NEW TABS ADDED HERE -->
       <button data-tab="moderation" class="${state.tab === 'moderation' ? 'active' : ''}">Moderation</button>
       <button data-tab="audit" class="${state.tab === 'audit' ? 'active' : ''}">Audit Log</button>
       <button data-tab="settings" class="${state.tab === 'settings' ? 'active' : ''}">Settings</button>
     </nav>
     <div class="sidebar-foot">
+      <button id="refresh-data" style="width: 100%; margin-bottom: 12px; padding: 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 12px;">
+        🔄 Refresh Data
+      </button>
       <div class="admin-chip"><strong>${escapeHtml(state.adminProfile?.display_name || 'Admin')}</strong>${escapeHtml(state.adminProfile?.email || '')}</div>
       <button class="sign-out-link" id="admin-sign-out">Sign out</button>
     </div>
@@ -343,6 +345,12 @@ document.addEventListener('click', event => {
     return;
   }
 
+    // REFRESH DATA BUTTON
+  if (event.target.id === 'refresh-data') {
+    showToast('Refreshing data...');
+    return loadAll();
+  }
+  
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
