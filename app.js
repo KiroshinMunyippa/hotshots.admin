@@ -46,18 +46,20 @@ async function checkAdmin() {
 async function loadAll() {
   state.loading = true; render();
   try {
-    const [{ users }, { recipes }, stats, analytics, moderation] = await Promise.all([
+    const [{ users }, { recipes }, stats, analytics, moderation, audit] = await Promise.all([
       authFetch('/api/admin/users'), 
       authFetch('/api/admin/recipes'), 
       authFetch('/api/admin/stats'),
       authFetch('/api/admin/analytics'),
-      authFetch('/api/admin/moderation') // <-- ADD THIS LINE
+      authFetch('/api/admin/moderation'),
+      authFetch('/api/admin/audit') // <-- ADD THIS LINE
     ]);
     state.users = users; 
     state.recipes = recipes; 
     state.stats = stats;
     state.analytics = analytics;
-    state.moderation = moderation; // <-- ADD THIS LINE
+    state.moderation = moderation;
+    state.audit = audit; // <-- ADD THIS LINE
   } catch (err) { 
     showToast(err.message); 
   }
@@ -259,6 +261,37 @@ function renderModeration() {
   `);
 }
 
+function renderAudit() {
+  if (!state.audit) {
+    renderShell('<p class="main-subtitle">Loading audit logs...</p>');
+    return;
+  }
+
+  renderShell(`
+    <h1>Audit Log</h1>
+    <p class="main-subtitle">Recent administrative actions and system events.</p>
+    <div class="table-card"><table>
+      <thead><tr><th>Timestamp</th><th>Action</th><th>Details</th></tr></thead>
+      <tbody>
+        ${state.audit.length ? state.audit.map(log => `
+          <tr>
+            <td>
+              ${formatDate(log.created_at)} 
+              <br><small style="color: var(--muted);">${new Date(log.created_at).toLocaleTimeString()}</small>
+            </td>
+            <td>
+              <span class="badge" style="background: var(--panel-2); text-transform: capitalize;">
+                ${escapeHtml(log.action || log.event || 'unknown')}
+              </span>
+            </td>
+            <td><small>${escapeHtml(log.details || log.metadata || JSON.stringify(log))}</small></td>
+          </tr>
+        `).join('') : '<tr class="empty-row"><td colspan="3">No audit logs found yet.</td></tr>'}
+      </tbody>
+    </table></div>
+  `);
+}
+
 function render() {
   if (!state.session) return renderAuth();
   if (!state.authChecked) { 
@@ -273,7 +306,7 @@ function render() {
   
   // NEW: Add placeholders for the new tabs
   if (state.tab === 'settings') return renderShell('<h1>Settings</h1><p class="main-subtitle">App configuration coming soon.</p>');
-  if (state.tab === 'audit') return renderShell('<h1>Audit Log</h1><p class="main-subtitle">Admin activity tracking coming soon.</p>');
+   if (state.tab === 'audit') return renderAudit();
   if (state.tab === 'moderation') return renderModeration();
   if (state.tab === 'analytics') return renderAnalytics();
   if (state.tab === 'recipes') return renderRecipes();
