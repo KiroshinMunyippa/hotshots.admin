@@ -155,7 +155,12 @@ function renderRecipes() {
 }
 
 function renderAnalytics() {
-  if (!state.analytics) return '<p class="main-subtitle">Loading analytics...</p>';
+  // FIX 1: Use renderShell instead of return for the loading state
+  if (!state.analytics) {
+    renderShell('<p class="main-subtitle">Loading analytics...</p>');
+    return;
+  }
+  
   const { totalUsers, recentSignups, planDist, catDist } = state.analytics;
 
   const renderBar = (label, count, total, colorVar) => {
@@ -175,7 +180,8 @@ function renderAnalytics() {
 
   const totalRecipes = Object.values(catDist).reduce((a, b) => a + b, 0);
 
-  return `
+  // FIX 2: Use renderShell instead of return to actually update the screen
+  renderShell(`
     <h1>Analytics</h1>
     <p class="main-subtitle">Overview of app growth and usage.</p>
     <div class="stat-strip">
@@ -195,7 +201,7 @@ function renderAnalytics() {
         ${Object.entries(catDist).map(([cat, count]) => renderBar(cat, count, totalRecipes, '--warn')).join('')}
       </div>
     </div>
-  `;
+  `);
 }
 
 function render() {
