@@ -42,24 +42,23 @@ async function checkAdmin() {
   state.adminProfile = data || null;
   state.authChecked = true;
 }
-
 async function loadAll() {
   state.loading = true; render();
   try {
-    const [{ users }, { recipes }, stats, analytics, moderation, audit] = await Promise.all([
+    const [{ users }, { recipes }, stats, analytics] = await Promise.all([ // removed moderation, audit
       authFetch('/api/admin/users'), 
       authFetch('/api/admin/recipes'), 
       authFetch('/api/admin/stats'),
-      authFetch('/api/admin/analytics'),
-      authFetch('/api/admin/moderation'),
-      authFetch('/api/admin/audit') // <-- ADD THIS LINE
+      authFetch('/api/admin/analytics')
+      // authFetch('/api/admin/moderation'), // <-- Temporarily disabled
+      // authFetch('/api/admin/audit')       // <-- Temporarily disabled
     ]);
     state.users = users; 
     state.recipes = recipes; 
     state.stats = stats;
     state.analytics = analytics;
-    state.moderation = moderation;
-    state.audit = audit; // <-- ADD THIS LINE
+    // state.moderation = moderation; // <-- Temporarily disabled
+    // state.audit = audit;           // <-- Temporarily disabled
   } catch (err) { 
     showToast(err.message); 
   }
