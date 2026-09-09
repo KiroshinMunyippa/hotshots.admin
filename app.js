@@ -46,16 +46,18 @@ async function checkAdmin() {
 async function loadAll() {
   state.loading = true; render();
   try {
-    const [{ users }, { recipes }, stats, analytics] = await Promise.all([
+    const [{ users }, { recipes }, stats, analytics, moderation] = await Promise.all([
       authFetch('/api/admin/users'), 
       authFetch('/api/admin/recipes'), 
       authFetch('/api/admin/stats'),
-      authFetch('/api/admin/analytics')
+      authFetch('/api/admin/analytics'),
+      authFetch('/api/admin/moderation') // <-- ADD THIS LINE
     ]);
     state.users = users; 
     state.recipes = recipes; 
     state.stats = stats;
     state.analytics = analytics;
+    state.moderation = moderation; // <-- ADD THIS LINE
   } catch (err) { 
     showToast(err.message); 
   }
@@ -227,6 +229,36 @@ function renderAnalytics() {
   `);
 }
 
+function renderModeration() {
+  if (!state.moderation) {
+    renderShell('<p class="main-subtitle">Loading moderation queue...</p>');
+    return;
+  }
+
+  const rows = state.moderation;
+
+  renderShell(`
+    <h1>Moderation</h1>
+    <p class="main-subtitle">Pending recipe reports requiring your attention.</p>
+    <div class="table-card"><table>
+      <thead><tr><th>Recipe</th><th>Reason</th><th>Reported On</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${rows.length ? rows.map(r => `
+          <tr data-report-id="${r.id}">
+            <td class="name-cell"><strong>${escapeHtml(r.recipe?.name || 'Unknown Recipe')}</strong><small>ID: ${r.recipe?.id || 'N/A'}</small></td>
+            <td>${escapeHtml(r.reason || 'No reason provided')}</td>
+            <td>${formatDate(r.created_at)}</td>
+            <td><div class="row-actions">
+              <button class="icon-button" data-action="dismiss" data-report-id="${r.id}">Dismiss</button>
+              <button class="icon-button danger" data-action="delete-recipe" data-report-id="${r.id}" data-recipe-id="${r.recipe?.id}">Delete Recipe</button>
+            </div></td>
+          </tr>
+        `).join('') : '<tr class="empty-row"><td colspan="4">No pending reports. Great job!</td></tr>'}
+      </tbody>
+    </table></div>
+  `);
+}
+
 function render() {
   if (!state.session) return renderAuth();
   if (!state.authChecked) { 
@@ -242,8 +274,7 @@ function render() {
   // NEW: Add placeholders for the new tabs
   if (state.tab === 'settings') return renderShell('<h1>Settings</h1><p class="main-subtitle">App configuration coming soon.</p>');
   if (state.tab === 'audit') return renderShell('<h1>Audit Log</h1><p class="main-subtitle">Admin activity tracking coming soon.</p>');
-  if (state.tab === 'moderation') return renderShell('<h1>Moderation</h1><p class="main-subtitle">Content moderation tools coming soon.</p>');
-
+  if (state.tab === 'moderation') return renderModeration();
   if (state.tab === 'analytics') return renderAnalytics();
   if (state.tab === 'recipes') return renderRecipes();
   return renderUsers();
@@ -401,6 +432,43 @@ document.addEventListener('click', event => {
     a.click();
     document.body.removeChild(a);
     showToast('Users exported successfully');
+  }
+  // MODERATION: Dismiss Report
+  const dismissBtn = event.target.closest('[data-action="dismiss"]');
+  if (dismissBtn) {
+    const reportId = dismissBtn.dataset.reportId;
+    authFetch('/api/admin/moderation', { 
+      method: 'PATCH', 
+      body: JSON.stringify({ reportId, action: 'dismiss' }) 
+    })
+    .then(() => { 
+      state.moderation = state.moderation.filter(r => r.id !== reportId); 
+      render(); 
+      showToast('Report dismissed'); 
+    })
+    .catch(err => showToast(err.message));
+    return;
+  }
+
+  // MODERATION: Delete Recipe
+  const deleteRecipeBtn = event.target.closest('[data-action="delete-recipe"]');
+  if (deleteRecipeBtn) {
+    const reportId = deleteRecipeBtn.dataset.reportId;
+    const recipeId = deleteRecipeBtn.dataset.recipeId;
+    if (!window.confirm('Are you sure you want to permanently delete this recipe and resolve the report?')) return;
+    
+    authFetch('/api/admin/moderation', { 
+      method: 'PATCH', 
+      body: JSON.stringify({ reportId, action: 'delete_recipe', recipeId }) 
+    })
+    .then(() => { 
+      state.moderation = state.moderation.filter(r => r.id !== reportId); 
+      state.recipes = state.recipes.filter(r => r.id !== recipeId); // Also remove from recipes tab
+      render(); 
+      showToast('Recipe deleted and report resolved'); 
+    })
+    .catch(err => showToast(err.message));
+    return;
   }
 });
 
