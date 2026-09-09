@@ -1,4 +1,3 @@
-// import { logAudit } from './logAudit.js';  <-- COMMENT THIS OUT
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
@@ -23,7 +22,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'PATCH') {
     const { id } = req.query;
-    const { subscription_plan, subscription_status, admin_email } = req.body;
+    const { subscription_plan, subscription_status } = req.body;
     
     try {
       const { data: user, error } = await supabase
@@ -34,12 +33,6 @@ export default async function handler(req, res) {
         .single();
 
       if (error) throw error;
-
-      // await logAudit(admin_email || 'Admin', 'Updated User', {  <-- COMMENT THIS OUT
-      //   userId: id, 
-      //   newPlan: subscription_plan, 
-      //   newStatus: subscription_status 
-      // });
 
       return res.status(200).json({ user });
     } catch (error) {
