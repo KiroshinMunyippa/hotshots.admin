@@ -146,6 +146,10 @@ function renderRecipes() {
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}">
+      <!-- NEW EXPORT BUTTON -->
+      <button id="export-recipes-csv" style="margin-left: auto; padding: 8px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer;">
+        Download CSV
+      </button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
@@ -191,10 +195,18 @@ function renderAnalytics() {
 
   const totalRecipes = Object.values(catDist).reduce((a, b) => a + b, 0);
 
-  // FIX 2: Use renderShell instead of return to actually update the screen
+  // FIX 2: Use renderShell and add the CSV button at the top right
   renderShell(`
-    <h1>Analytics</h1>
-    <p class="main-subtitle">Overview of app growth and usage.</p>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <div>
+        <h1 style="margin: 0;">Analytics</h1>
+        <p class="main-subtitle" style="margin: 4px 0 0;">Overview of app growth and usage.</p>
+      </div>
+      <button id="export-analytics-csv" style="padding: 8px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer;">
+        Download CSV
+      </button>
+    </div>
+
     <div class="stat-strip">
       <div class="stat-box"><strong>${totalUsers}</strong><span>Total Users</span></div>
       <div class="stat-box"><strong>${recentSignups}</strong><span>Signups (30d)</span></div>
