@@ -1,1 +1,55 @@
-Nothing needs to be added to .gitignore since the only change is the addition of the .gitignore file itself, and there are no other files that match the ignore patterns.
+```
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Dependencies (if any Python/Rust/Node projects)
+node_modules/
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+.env/
+
+# Build outputs (if any)
+dist/
+build/
+target/
+*.so
+*.dylib
+*.dll
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+.mypy_cache/
+```
