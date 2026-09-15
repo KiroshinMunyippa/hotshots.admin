@@ -1,34 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Initialize Supabase clients
   const accounts = createClient(
-    process.env.SUPABASE_ACCOUNTS_URL, 
-    process.env.SUPABASE_ACCOUNTS_SERVICE_KEY
+    process.env.SUPABASE_ACCOUNTS_URL,
+    process.env.SUPABASE_ACCOUNTS_SERVICE_KEY,
+    { realtime: { transport: ws } }
   );
   const appdata = createClient(
-    process.env.SUPABASE_APPDATA_URL, 
-    process.env.SUPABASE_APPDATA_SERVICE_KEY
+    process.env.SUPABASE_APPDATA_URL,
+    process.env.SUPABASE_APPDATA_SERVICE_KEY,
+    { realtime: { transport: ws } }
   );
 
   try {
-    // 🔒 SECURITY CHECK: Verify the user's authentication token
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Unauthorized: Missing token' });
     }
-    
+
     const token = authHeader.split(' ')[1];
-    
-    // Verify token and get user
     const { data: { user }, error: authError } = await accounts.auth.getUser(token);
     if (authError || !user) {
       return res.status(401).json({ error: 'Unauthorized: Invalid token' });
     }
 
-    //  SECURITY CHECK: Verify the user is an admin
     const { data: profile, error: profileError } = await accounts
       .from('profiles')
       .select('is_admin')
@@ -39,7 +37,6 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Forbidden: Admin access required' });
     }
 
-    // ✅ Fetch Analytics Data
     const { data: users } = await accounts.from('profiles').select('subscription_plan');
     const totalUsers = users?.length || 0;
     const planDist = users?.reduce((acc, u) => {
@@ -60,16 +57,15 @@ export default async function handler(req, res) {
       return acc;
     }, {}) || {};
 
-    // Return analytics data
-    res.status(200).json({ 
-      totalUsers, 
-      recentSignups: recentSignups || 0, 
-      planDist, 
-      catDist 
+    res.status(200).json({
+      totalUsers,
+      recentSignups: recentSignups || 0,
+      planDist,
+      catDist
     });
 
   } catch (error) {
     console.error('Analytics API Error:', error);
-    res.status(500).json({ error: error.message || 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 }

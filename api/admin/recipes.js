@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -7,12 +8,14 @@ export default async function handler(req, res) {
 
   const appdata = createClient(
     process.env.SUPABASE_APPDATA_URL,
-    process.env.SUPABASE_APPDATA_SERVICE_KEY
+    process.env.SUPABASE_APPDATA_SERVICE_KEY,
+    { realtime: { transport: ws } }
   );
 
   const accounts = createClient(
     process.env.SUPABASE_ACCOUNTS_URL,
-    process.env.SUPABASE_ACCOUNTS_SERVICE_KEY
+    process.env.SUPABASE_ACCOUNTS_SERVICE_KEY,
+    { realtime: { transport: ws } }
   );
 
   try {

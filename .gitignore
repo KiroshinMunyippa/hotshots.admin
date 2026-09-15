@@ -1,55 +1,29 @@
 ```
-# Environment variables
+# Dependencies
+node_modules/
+
+# Environment
 .env
 .env.local
-.env.*
+*.env.*
 
-# Logs
+# Logs and temp files
 *.log
-
-# Temporary files
 *.tmp
-*.swp
-*.swo
 
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Dependencies (if any Python/Rust/Node projects)
-node_modules/
-__pycache__/
-*.egg-info/
-.venv/
-venv/
-.env/
-
-# Build outputs (if any)
-dist/
-build/
-target/
-*.so
-*.dylib
-*.dll
-
-# IDE specific
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
-# Coverage reports
-coverage/
-htmlcov/
-.coverage
-
-# Python specific
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py~
 .Python
-*.so
-.pytest_cache/
-.mypy_cache/
+venv/
+.venv/
+.env
+.env.local
 ```
