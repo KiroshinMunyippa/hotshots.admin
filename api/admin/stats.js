@@ -1,10 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const accounts = createClient(process.env.SUPABASE_ACCOUNTS_URL, process.env.SUPABASE_ACCOUNTS_SERVICE_KEY);
-  const appdata = createClient(process.env.SUPABASE_APPDATA_URL, process.env.SUPABASE_APPDATA_SERVICE_KEY);
+  const accounts = createClient(process.env.SUPABASE_ACCOUNTS_URL, process.env.SUPABASE_ACCOUNTS_SERVICE_KEY, {
+    realtime: { transport: ws }
+  });
+  const appdata = createClient(process.env.SUPABASE_APPDATA_URL, process.env.SUPABASE_APPDATA_SERVICE_KEY, {
+    realtime: { transport: ws }
+  });
 
   try {
     const [{ count: users }, { count: paid }, { count: recipes }, { count: shared }] = await Promise.all([

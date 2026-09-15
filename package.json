@@ -4,6 +4,7 @@
   "type": "module",
   "version": "1.0.0",
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.4"
+    "@supabase/supabase-js": "^2.45.4",
+    "ws": "^8.21.3"
   }
 }
