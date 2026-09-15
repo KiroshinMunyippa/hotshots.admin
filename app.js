@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { inject } from 'https://esm.sh/@vercel/analytics';
 import { SUPABASE_ACCOUNTS_URL, SUPABASE_ACCOUNTS_ANON_KEY, API_BASE } from './config.js';
 
 const supabase = createClient(SUPABASE_ACCOUNTS_URL, SUPABASE_ACCOUNTS_ANON_KEY);
@@ -513,3 +514,6 @@ document.addEventListener('click', event => {
 });
 
 render();
+
+// Initialize Vercel Web Analytics
+inject();
