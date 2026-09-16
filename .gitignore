@@ -1,0 +1,1 @@
+Nothing should be ignored based on the provided file changes. The only change is a deleted JavaScript file (`api/admin/users.js`), which doesn't require any .gitignore rules since it's a source code file that was removed. No build artifacts, dependencies, or temporary files are present in the changes.
