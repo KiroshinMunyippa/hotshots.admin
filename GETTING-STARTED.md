@@ -6,6 +6,10 @@ This assumes you've already got the main HotShots app's two Supabase projects (A
 
 1. Open the **Accounts** Supabase project (the same one the main app uses) in the SQL Editor.
 2. Paste in and run `db/add-admin-flag.sql`.
+3. Then paste in and run `db/audit-logs.sql` too — this creates the `audit_logs`
+   table the portal records account/recipe changes in. Without it, every admin
+   action that writes an audit entry fails with a 500
+   ("relation public.audit_logs does not exist").
 
 ## 2. Make yourself an admin
 
