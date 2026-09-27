@@ -75,11 +75,24 @@ let sharedColumn = 'is_shared';
 const SHARED_COLUMN_FALLBACKS = ['shared', 'visible', 'published'];
 const isMissingColumnError = (err) => /does not exist|column .*not (?:be )?found|undefined column|schema cache|PGRST204/i.test(err?.message || '');
 
+// Read-only info shown at the top of the recipe edit popup: who made it, when
+// it was created and its current rating. These aren't editable by an admin --
+// ratings belong to the community and authorship is fixed -- so they're display
+// only, which also means no dead inputs in the form.
+const recipeRatingText = (r) => {
+  const rating = r?.rating;
+  const count = Number(rating?.count ?? 0);
+  if (!count) return 'No ratings yet';
+  const avg = Number(rating.total ?? 0) / count;
+  return `${avg.toFixed(1)} ★ from ${count} rating${count === 1 ? '' : 's'}`;
+};
+
 // The fields the popup edit form exposes. `text`/`number` inputs are one-liners,
 // `textarea` gets a full-width row. Values come straight off the API row.
 // Cuisine and Price are intentionally not editable here -- they stay untouched
-// on the recipe row. `file: true` on Image renders a plain "Add image" control
-// with a file input directly underneath it (no URL text box).
+// on the recipe row. `file: true` on Image renders a single "Add photo" button
+// that opens the OS file picker directly -- there's no visible "Choose file"
+// input and no URL text box (see the image-picker markup below).
 const RECIPE_EDIT_FIELDS = [
   { key: 'name', label: 'Name', type: 'text' },
   { key: 'category', label: 'Category', type: 'text' },
@@ -287,8 +300,11 @@ function renderUsers() {
             <td><span class="badge status-${u.subscription_status}">${escapeHtml(u.subscription_status)}</span></td>
             <td>${formatDate(u.created_at)}</td>
             <td><div class="row-actions">
-              <select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
-              <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
+              <!-- These two selects are quick overrides: they PATCH the account
+                   the moment you change them (see the change listener below),
+                   which is why there's no separate "Apply" button next to them. -->
+              <select data-field="subscription_plan" data-user-quick="${u.id}" aria-label="Plan for ${escapeHtml(u.display_name || u.email || 'this user')}"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
+              <select data-field="subscription_status" data-user-quick="${u.id}" aria-label="Status for ${escapeHtml(u.display_name || u.email || 'this user')}"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
               <button class="icon-button" data-edit-user="${u.id}">Edit</button>
             </div></td>
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>'}
@@ -319,10 +335,14 @@ function userEditModal(u) {
     return `<label class="edit-field ${f.type === 'text' ? '' : 'full'}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
   }).join('');
 
-  // Sub menu shown under Save/Cancel: Flag / Unflag admin access.
+  // Sub menu shown under Save/Cancel: a single toggle that flags an account as
+  // an admin, or unflags it again ("Unplug" was never a real action — the only
+  // thing this button does is grant/revoke admin access). It reads the live
+  // cached row on every re-render, so after saving a change the label always
+  // matches what's actually stored for that account.
   const flagButton = u.id === state.adminProfile?.id
     ? ''
-    : `<button type="button" class="icon-button${u.is_admin ? ' danger' : ''}" data-flag-admin="${u.id}" data-flagged="${Boolean(u.is_admin)}">${u.is_admin ? 'Unflag' : 'Flag user'}</button>`;
+    : `<button type="button" class="icon-button${u.is_admin ? ' danger' : ''}" data-flag-admin="${u.id}" data-flagged="${Boolean(u.is_admin)}">${u.is_admin ? 'Unflag admin' : 'Flag user'}</button>`;
 
   return `
     <div class="modal-backdrop" id="user-edit-modal" data-modal-for="${u.id}">
@@ -377,18 +397,23 @@ const withSharedFlags = (recipe, shared) => Object.fromEntries(
 
 // One row per recipe. Editing happens in a popup (see recipeEditModal), so the
 // table rows stay compact and never get squashed by an inline form. Only the
-// Edit button is visible on the row -- Hide/Unhide and Delete live in the
-// popup's submenu.
+// Edit button is on the row -- visibility and Delete live in the popup.
+// The Rating column shows the average of every community rating plus how many
+// ratings it's based on (both come from /api/admin/recipes).
 function recipeRow(r) {
   const priceCell = anyRecipeHasPrice()
     ? `<td>${r.price !== undefined && r.price !== null && r.price !== '' ? formatRands(r.price) : '—'}</td>`
     : '';
+  const count = Number(r.rating?.count ?? 0);
+  const avg = count ? Number(r.rating.total ?? 0) / count : null;
+  const ratingCell = `<td><div class="row-actions"><span class="badge ${count ? 'rated' : 'unrated'}" title="${count ? `${Number(r.rating.total)} points across ${count} rating${count === 1 ? '' : 's'}` : 'No community ratings yet'}">${avg === null ? 'Unrated' : `★ ${avg.toFixed(1)}`}</span>${count ? `<small class="rating-count">${count}</small>` : ''}</div></td>`;
 
   return `
     <tr data-recipe-row="${r.id}">
       <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category || 'Uncategorised')}</small></td>
       <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong></td>
       ${priceCell}
+      ${ratingCell}
       <td>${visibilityBadge(r)}</td>
       <td>${formatDate(r.created_at)}</td>
       <td><div class="row-actions">
@@ -399,8 +424,10 @@ function recipeRow(r) {
 
 // The Edit button opens this popup instead of an inline form squashed into a
 // table cell. It's rendered after the table so it floats above everything.
-// The submenu under Save/Cancel carries the visible Hide/Unhide button and the
-// red Delete button.
+// Visibility is controlled by the "Visible in Explore" switch at the top of the
+// form -- that checkbox *is* the visibility button and saves immediately (see
+// the change listener), so there's no separate Hide/Unhide action any more.
+// Delete lives in the submenu underneath.
 function recipeEditModal(r) {
   const fields = RECIPE_EDIT_FIELDS.map(f => {
     const value = r[f.key] ?? '';
@@ -408,13 +435,15 @@ function recipeEditModal(r) {
     if (f.type === 'textarea') {
       input = `<textarea data-edit-field="${f.key}" rows="3">${escapeHtml(value)}</textarea>`;
     } else if (f.type === 'file') {
-      // "Add image": a plain button with the file input directly underneath it,
-      // plus a thumbnail of whatever image the recipe currently has.
+      // "Add photo": one button that opens the file picker straight away. The
+      // <input type="file"> itself is hidden (see .image-picker in styles.css),
+      // so there's no browser "Choose file" control on screen -- just the
+      // button and a thumbnail of whatever photo the recipe currently has.
       const isPreviewable = typeof value === 'string' && /^(https?:|data:image\/)/i.test(value);
       input = `
         <span class="image-picker">
-          <button type="button" class="ghost-button small" data-pick-image="${f.key}">Add image</button>
-          <input type="file" accept="image/*" data-image-file="${f.key}">
+          <button type="button" class="ghost-button small" data-pick-image="${f.key}">Add photo</button>
+          <input type="file" accept="image/*" data-image-file="${f.key}" tabindex="-1" aria-hidden="true">
           <img class="image-preview ${isPreviewable ? '' : 'hidden'}" data-image-preview="${f.key}" src="${isPreviewable ? escapeHtml(value) : ''}" alt="">
         </span>`;
     } else if (f.money) {
@@ -434,8 +463,12 @@ function recipeEditModal(r) {
           <button class="modal-close" data-cancel-edit aria-label="Close">&times;</button>
         </div>
         <form class="edit-form" id="recipe-edit-form" data-save-recipe="${r.id}">
+          <div class="recipe-meta">
+            <span><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong> · added ${formatDate(r.created_at)}</span>
+            <span class="rating-chip" title="Average of all community ratings">${escapeHtml(recipeRatingText(r))}</span>
+          </div>
           <div class="edit-grid">${fields}</div>
-          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${shared ? 'checked' : ''}><span>Visible in Explore</span></label>
+          <label class="edit-field check"><input type="checkbox" data-toggle-shared="${r.id}" data-currently-shared="${shared}" ${shared ? 'checked' : ''}><span>Visible in Explore</span></label>
           <div class="edit-actions">
             <button type="submit" class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
             <button type="button" class="icon-button" data-cancel-edit>Cancel</button>
@@ -443,7 +476,6 @@ function recipeEditModal(r) {
           <div class="submenu-row">
             <span class="submenu-label">More actions</span>
             <div class="row-actions">
-              <button type="button" class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${shared}">${shared ? 'Hide' : 'Unhide'}</button>
               <button type="button" class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
             </div>
           </div>
@@ -459,21 +491,21 @@ function renderRecipes() {
     || r.author?.display_name?.toLowerCase().includes(search));
 
   const hasPrice = anyRecipeHasPrice();
-  const colCount = hasPrice ? 6 : 5;
+  const colCount = hasPrice ? 7 : 6;
   const editing = state.editingRecipeId
     ? state.recipes.find(r => r.id === state.editingRecipeId)
     : null;
 
   renderShell(`
     <h1>Recipes</h1>
-    <p class="main-subtitle">Every recipe across the app — edit details, hide it from Explore, or delete it.</p>
+    <p class="main-subtitle">Every recipe across the app — edit details, toggle whether it shows in Explore, or delete it.</p>
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}">
       <button id="export-recipes-csv" class="ghost-button">Download CSV</button>
     </div>
     <div class="table-card"><table>
-      <thead><tr><th>Recipe</th><th>Author</th>${hasPrice ? '<th>Price</th>' : ''}<th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Recipe</th><th>Author</th>${hasPrice ? '<th>Price</th>' : ''}<th>Rating</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>
         ${rows.length ? rows.map(recipeRow).join('') : `<tr class="empty-row"><td colspan="${colCount}">No recipes match that search.</td></tr>`}
       </tbody>
@@ -964,21 +996,18 @@ document.addEventListener('click', event => {
     return loadAll();
   }
   
-  // Hide / unhide from the Edit popup's submenu.
+  // VISIBILITY is driven by the "Visible in Explore" checkbox inside the recipe
+  // edit popup (there's no separate Hide/Unhide button any more). It saves the
+  // moment you flip it, so it can't be lost by closing the popup. The value to
+  // send is read straight off the checkbox rather than inferred from the cached
+  // row, and on failure the switch is flipped back so the UI never lies.
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
-    const recipe = state.recipes.find(r => r.id === id);
-    // Flip based on what the cached row actually says, not the stale data-*
-    // attribute (which can be out of sync after a failed/optimistic update).
-    const wasShared = recipe ? recipeShared(recipe) : toggle.dataset.currentlyShared === 'true';
-    const nextShared = !wasShared;
+    const nextShared = toggle.checked;
     toggle.disabled = true;
     patchRecipe(id, { is_shared: nextShared })
     .then(({ recipe: updated }) => {
-      // Trust the server's copy when it sent one, but make sure *every* alias
-      // of the flag matches -- otherwise recipeShared() could still read the
-      // old `shared`/`visible` value and the row would look unchanged.
       state.recipes = state.recipes.map(r => {
         if (r.id !== id) return r;
         const merged = { ...r, ...(updated || {}) };
@@ -990,19 +1019,19 @@ document.addEventListener('click', event => {
           : nextShared;
         return { ...merged, ...withSharedFlags(merged, finalShared) };
       });
-      if (state.editingRecipeId === id) state.editingRecipeId = null;
       rerenderTab();
-      showToast(nextShared ? 'Recipe unhidden \u2014 visible in Explore' : 'Recipe hidden from Explore');
+      showToast(nextShared ? 'Recipe visible in Explore' : 'Recipe hidden from Explore');
       refreshAuditLog();
     })
     .catch(err => {
+      toggle.checked = !nextShared;
       toggle.disabled = false;
       showToast(err.message);
     });
     return;
   }
 
-  // IMAGE: "Add image" just opens the file input underneath it.
+  // IMAGE: "Add photo" just opens the (hidden) file input.
   const pickImage = event.target.closest('[data-pick-image]');
   if (pickImage) {
     const fileInput = app.querySelector(`[data-image-file="${pickImage.dataset.pickImage}"]`);
@@ -1089,6 +1118,12 @@ document.addEventListener('click', event => {
     return;
   }
 
+  // RECIPES: "Download CSV" for the rows currently shown in the table.
+  if (event.target.closest('#export-recipes-csv')) {
+    exportRecipesCsv();
+    return;
+  }
+
   // SETTINGS: export the loaded audit log as CSV
   if (event.target.id === 'export-audit-csv') {
     if (!state.audit.length) { showToast('No audit logs to export'); return; }
@@ -1132,6 +1167,9 @@ document.addEventListener('click', event => {
 
 // Collect the popup form's inputs and PATCH only the fields that changed.
 // `button` is optional (used to disable the control while the request runs).
+// The "Visible in Explore" checkbox is deliberately not read here -- it saves
+// on its own as soon as it's flipped (see the click handler above), so a later
+// "Save changes" can never quietly undo a visibility toggle.
 function submitRecipeForm(id, container, button) {
   const original = state.recipes.find(r => r.id === id);
   if (!original || !container) return;
@@ -1146,11 +1184,6 @@ function submitRecipeForm(id, container, button) {
     // Compare against what the row actually holds right now.
     if (value !== (original[f.key] ?? '')) payload[f.key] = value;
   });
-
-  const sharedInput = container.querySelector('[data-edit-field="is_shared"]');
-  if (sharedInput && Boolean(sharedInput.checked) !== recipeShared(original)) {
-    payload.is_shared = sharedInput.checked;
-  }
 
   if (!Object.keys(payload).length) {
     showToast('Nothing to save');
@@ -1284,11 +1317,23 @@ document.addEventListener('input', event => {
   }
 });
 
-// SETTINGS: every control saves as soon as it changes -- toggles instantly,
-// text/number/list inputs when the field loses focus or Enter is pressed.
+// The "Visible in Explore" checkbox is a click-activated control (see the click
+// listener above), so it must never bubble up to this change handler -- that
+// would otherwise try to save it as a Settings row.
 document.addEventListener('change', event => {
-  // Recipe edit popup: a local image picked from the PC gets read and dropped
-  // into the Image URL field (as a data URL) plus shown in the thumbnail.
+  if (event.target.closest('[data-toggle-shared]')) return;
+
+  // USERS table quick overrides: the Plan / Status selects in each row PATCH
+  // that account straight away, which is why there's no Apply button beside
+  // them. Without this they were dead controls.
+  const quick = event.target.closest('[data-user-quick]');
+  if (quick) {
+    saveUserQuickField(quick);
+    return;
+  }
+
+  // Recipe edit popup: a local photo picked from the PC gets read and dropped
+  // into the Image field (as a data URL) plus shown in the thumbnail.
   const fileInput = event.target.closest('[data-image-file]');
   if (fileInput) {
     handleRecipeImagePick(fileInput);
@@ -1298,6 +1343,35 @@ document.addEventListener('change', event => {
   if (!input) return; // checkboxes fire change after flipping; text inputs on blur/Enter
   saveSetting(input);
 });
+
+// One of the two inline selects on a Users row changed: send just that field
+// and update the cached row (plus its badge) from the server's reply.
+const QUICK_USER_FIELDS = ['subscription_plan', 'subscription_status'];
+const userFieldValue = (select) => select.value.trim();
+
+function saveUserQuickField(select) {
+  const key = select.dataset.field;
+  const id = select.dataset.userQuick;
+  if (!QUICK_USER_FIELDS.includes(key)) return;
+  const original = state.users.find(u => u.id === id);
+  if (!original) return;
+  const value = userFieldValue(select);
+  if (value === original[key]) return; // reverted back to what it was
+
+  select.disabled = true;
+  authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ [key]: value }) })
+    .then(({ user }) => {
+      state.users = state.users.map(u => u.id === id ? { ...u, ...(user || {}), [key]: user?.[key] ?? value } : u);
+      rerenderTab();
+      showToast(`${fieldLabel(key)} updated`);
+      refreshAuditLog();
+    })
+    .catch(err => {
+      select.value = original[key] ?? '';
+      select.disabled = false;
+      showToast(err.message);
+    });
+}
 
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // keep data URLs small enough to store
 
@@ -1328,10 +1402,44 @@ function handleRecipeImagePick(fileInput) {
       preview.src = dataUrl;
       preview.classList.remove('hidden');
     }
-    showToast('Image loaded — click Save changes to store it');
+    showToast('Photo loaded — click Save changes to store it');
   };
   reader.onerror = () => showToast("Couldn't read that file");
   reader.readAsDataURL(file);
+}
+
+// RECIPES tab "Download CSV": exports exactly the rows currently visible in the
+// table (i.e. after the search filter), with the same columns -- including the
+// rating, so admins can review it offline.
+const csvCell = (value) => {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+function exportRecipesCsv() {
+  const search = state.recipeSearch.trim().toLowerCase();
+  const rowsToExport = state.recipes.filter(r => !search
+    || r.name?.toLowerCase().includes(search)
+    || r.author?.display_name?.toLowerCase().includes(search));
+  if (!rowsToExport.length) { showToast('No recipes to export'); return; }
+
+  const hasPrice = anyRecipeHasPrice();
+  const headers = ['Name', 'Author', ...(hasPrice ? ['Price'] : []), 'Rating', 'Ratings', 'Visibility', 'Created'];
+  const body = rowsToExport.map(r => {
+    const count = Number(r.rating?.count ?? 0);
+    const avg = count ? Number(r.rating.total ?? 0) / count : '';
+    return [
+      csvCell(r.name),
+      csvCell(r.author?.display_name || 'Unknown'),
+      ...(hasPrice ? [csvCell(r.price ?? '')] : []),
+      csvCell(avg),
+      csvCell(count),
+      recipeShared(r) ? 'Visible' : 'Hidden',
+      csvCell(r.created_at || '')
+    ];
+  });
+  downloadCsv([headers, ...body], 'hotshots_recipes.csv');
+  showToast(`Exported ${rowsToExport.length} recipe${rowsToExport.length === 1 ? '' : 's'}`);
 }
 
 function saveSetting(input) {
