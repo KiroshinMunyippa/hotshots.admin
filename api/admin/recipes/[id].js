@@ -4,7 +4,45 @@ import { logAudit } from '../logAudit.js';
 
 // Fields the admin is allowed to change on a recipe. `is_shared` is the
 // visibility toggle (show/hide in Explore); everything else is editable copy.
-const EDITABLE_FIELDS = ['name', 'description', 'category', 'cuisine', 'difficulty', 'prep_time', 'cook_time', 'servings', 'image_url', 'is_shared'];
+// `price` is displayed as Rands (ZAR) in the admin portal.
+const EDITABLE_FIELDS = ['name', 'description', 'category', 'cuisine', 'difficulty', 'price', 'prep_time', 'cook_time', 'servings', 'image_url', 'is_shared'];
+
+// Different deployments of the recipes table have called the visibility column
+// `is_shared`, `shared`, `visible` or `published`. If an UPDATE fails because
+// the column we tried doesn't exist, retry with the next candidate and persist
+// the winner here so subsequent requests skip straight to it.
+const SHARED_COLUMN_CANDIDATES = ['is_shared', 'shared', 'visible', 'published'];
+let resolvedSharedColumn = null;
+
+const isMissingColumnError = (error) => /does not exist|column .*not (?:be )?found|undefined column|PGRST204/i.test(error?.message || '');
+
+async function updateRecipe(updates, id) {
+  const payload = { ...updates, updated_at: new Date().toISOString() };
+  const run = (body) => appData.from('recipes').update(body).eq('id', id).select('*').single();
+
+  let error = null;
+  let result = await run(payload);
+  if (!result.data && error === null && result.error) error = result.error;
+  if (result.data) return result;
+
+  // A missing-column failure on the visibility flag: probe the alternatives.
+  if ('is_shared' in payload && isMissingColumnError(error)) {
+    const candidates = SHARED_COLUMN_CANDIDATES.filter(c => c !== 'is_shared' && c !== resolvedSharedColumn);
+    if (resolvedSharedColumn && resolvedSharedColumn !== 'is_shared') candidates.unshift(resolvedSharedColumn);
+    for (const col of candidates) {
+      const alt = { ...payload };
+      alt[col] = alt.is_shared;
+      delete alt.is_shared;
+      const attempt = await run(alt);
+      if (attempt.data) {
+        resolvedSharedColumn = col;
+        // Report back under the canonical name so clients don't need to know.
+        return { data: { ...attempt.data, is_shared: attempt.data[col] ?? alt[col] }, error: null };
+      }
+    }
+  }
+  return result;
+}
 
 export default async function handler(req, res) {
   const admin = await verifyAdmin(req);
@@ -29,13 +67,8 @@ export default async function handler(req, res) {
         .eq('id', id)
         .maybeSingle();
 
-      const { data, error } = await appData
-        .from('recipes')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select('*')
-        .single();
-      if (error) throw error;
+      const { data, error } = await updateRecipe(updates, id);
+      if (!data) throw error || new Error('Recipe not found');
 
       const changed = Object.fromEntries(
         Object.entries(updates).filter(([key, value]) => before?.[key] !== value)

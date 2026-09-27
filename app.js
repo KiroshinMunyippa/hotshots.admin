@@ -16,6 +16,15 @@ const showToast = (message) => {
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
+// All money in this deployment is South African Rand. The values are stored as
+// plain numbers (in app_settings and on recipe rows) -- formatting happens here
+// at display time so the stored data stays numeric.
+const formatRands = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return `R${n.toFixed(2)}`;
+};
+
 // Short "time ago" label for the audit log (falls back to a date beyond a week).
 const timeAgo = (iso) => {
   if (!iso) return '—';
@@ -42,13 +51,24 @@ const visibilityBadge = (recipe) => recipeShared(recipe)
 // one is present (falling back to "visible").
 const recipeShared = (recipe) => Boolean(recipe.is_shared ?? recipe.shared ?? true);
 
-// The fields the inline edit form exposes. `text`/`number` inputs are one-liners,
+// Which column actually carries visibility for this deployment. Defaults to
+// `is_shared`; if a PATCH comes back saying that column doesn't exist on the
+// recipes table, we probe the alternatives (`shared`, `visible`, `published`)
+// and remember whichever one the table really has -- so "Hide" keeps working
+// even when the schema names the flag differently.
+let sharedColumn = 'is_shared';
+const SHARED_COLUMN_FALLBACKS = ['shared', 'visible', 'published'];
+const isMissingColumnError = (err) => /does not exist|column .*not (?:be )?found|undefined column|schema cache|PGRST204/i.test(err?.message || '');
+
+// The fields the popup edit form exposes. `text`/`number` inputs are one-liners,
 // `textarea` gets a full-width row. Values come straight off the API row.
+// Money fields set `money: true` so they render with a "R" (Rand) prefix.
 const RECIPE_EDIT_FIELDS = [
   { key: 'name', label: 'Name', type: 'text' },
   { key: 'category', label: 'Category', type: 'text' },
   { key: 'cuisine', label: 'Cuisine', type: 'text' },
   { key: 'difficulty', label: 'Difficulty', type: 'text' },
+  { key: 'price', label: 'Price (R)', type: 'number', money: true, min: 0, step: 0.01 },
   { key: 'prep_time', label: 'Prep time (min)', type: 'number' },
   { key: 'cook_time', label: 'Cook time (min)', type: 'number' },
   { key: 'servings', label: 'Servings', type: 'number' },
@@ -85,8 +105,38 @@ async function authFetch(path, options = {}) {
     // the status instead of dying with "JSON Parse error: Unexpected identifier".
     throw new Error(`Server error ${response.status} on ${path}`);
   }
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const err = new Error(body.error || `Request failed (${response.status})`);
+    err.status = response.status;
+    throw err;
+  }
   return body;
+}
+
+// PATCH a recipe, working around deployments where the visibility flag lives
+// under a different column name. If the server reports that `is_shared` isn't
+// a real column, resend the same change using the next candidate name and
+// remember which one worked for the rest of the session.
+async function patchRecipe(id, payload) {
+  try {
+    return await authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+  } catch (err) {
+    if ('is_shared' in payload && err.status === 500 && isMissingColumnError(err)) {
+      for (const col of SHARED_COLUMN_FALLBACKS) {
+        if (col === sharedColumn) continue;
+        const alt = { ...payload, [col]: payload.is_shared };
+        delete alt.is_shared;
+        try {
+          const res = await authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(alt) });
+          sharedColumn = col;
+          return res;
+        } catch (inner) {
+          if (!isMissingColumnError(inner)) throw inner;
+        }
+      }
+    }
+    throw err;
+  }
 }
 
 async function checkAdmin() {
@@ -225,47 +275,67 @@ function renderUsers() {
     </table></div>`);
 }
 
-// One row per recipe; when a row is being edited its edit form is rendered in
-// an extra <tr> directly underneath it.
+// Only show a Price column when at least one recipe actually carries a price --
+// most recipes are user-generated with no price at all.
+const anyRecipeHasPrice = () => state.recipes.some(r => r.price !== undefined && r.price !== null && r.price !== '');
+
+// One row per recipe. Editing happens in a popup (see recipeEditModal), so the
+// table rows stay compact and never get squashed by an inline form.
 function recipeRow(r) {
-  const editing = state.editingRecipeId === r.id;
-
-  const fields = RECIPE_EDIT_FIELDS.map(f => {
-    const value = r[f.key] ?? '';
-    const input = f.type === 'textarea'
-      ? `<textarea data-edit-field="${f.key}" rows="3">${escapeHtml(value)}</textarea>`
-      : `<input type="${f.type}" data-edit-field="${f.key}" value="${escapeHtml(value)}">`;
-    return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${f.label}</span>${input}</label>`;
-  }).join('');
-
   const shared = recipeShared(r);
-
-  const editRow = editing ? `
-    <tr class="edit-row" data-edit-row="${r.id}">
-      <td colspan="5">
-        <div class="edit-form">
-          <div class="edit-grid">${fields}</div>
-          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${shared ? 'checked' : ''}><span>Visible in Explore</span></label>
-          <div class="edit-actions">
-            <button class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
-            <button class="icon-button" data-cancel-edit>Cancel</button>
-          </div>
-        </div>
-      </td>
-    </tr>` : '';
+  const priceCell = anyRecipeHasPrice()
+    ? `<td>${r.price !== undefined && r.price !== null && r.price !== '' ? formatRands(r.price) : '—'}</td>`
+    : '';
 
   return `
-    <tr data-recipe-row="${r.id}" class="${editing ? 'is-editing' : ''}">
+    <tr data-recipe-row="${r.id}">
       <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category || 'Uncategorised')}</small></td>
       <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong></td>
+      ${priceCell}
       <td>${visibilityBadge(r)}</td>
       <td>${formatDate(r.created_at)}</td>
       <td><div class="row-actions">
-        <button class="icon-button" data-edit-recipe="${r.id}">${editing ? 'Close' : 'Edit'}</button>
+        <button class="icon-button" data-edit-recipe="${r.id}">Edit</button>
         <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${shared}">${shared ? 'Hide' : 'Unhide'}</button>
         <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
       </div></td>
-    </tr>${editRow}`;
+    </tr>`;
+}
+
+// The Edit button opens this popup instead of an inline form squashed into a
+// table cell. It's rendered after the table so it floats above everything.
+function recipeEditModal(r) {
+  const fields = RECIPE_EDIT_FIELDS.map(f => {
+    const value = r[f.key] ?? '';
+    let input;
+    if (f.type === 'textarea') {
+      input = `<textarea data-edit-field="${f.key}" rows="3">${escapeHtml(value)}</textarea>`;
+    } else if (f.money) {
+      input = `<span class="input-affix"><span class="affix">R</span><input type="number" data-edit-field="${f.key}" min="${f.min ?? 0}" step="${f.step ?? 1}" value="${escapeHtml(value)}"></span>`;
+    } else {
+      input = `<input type="${f.type}" data-edit-field="${f.key}"${f.min !== undefined ? ` min="${f.min}"` : ''}${f.step !== undefined ? ` step="${f.step}"` : ''} value="${escapeHtml(value)}">`;
+    }
+    return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
+  }).join('');
+
+  const shared = recipeShared(r);
+  return `
+    <div class="modal-backdrop" id="recipe-edit-modal" data-modal-for="${r.id}">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Edit recipe">
+        <div class="modal-head">
+          <h2>Edit recipe</h2>
+          <button class="modal-close" data-cancel-edit aria-label="Close">&times;</button>
+        </div>
+        <form class="edit-form" id="recipe-edit-form" data-save-recipe="${r.id}">
+          <div class="edit-grid">${fields}</div>
+          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${shared ? 'checked' : ''}><span>Visible in Explore</span></label>
+          <div class="edit-actions">
+            <button type="submit" class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
+            <button type="button" class="icon-button" data-cancel-edit>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
 }
 
 function renderRecipes() {
@@ -273,6 +343,12 @@ function renderRecipes() {
   const rows = state.recipes.filter(r => !search
     || r.name?.toLowerCase().includes(search)
     || r.author?.display_name?.toLowerCase().includes(search));
+
+  const hasPrice = anyRecipeHasPrice();
+  const colCount = hasPrice ? 6 : 5;
+  const editing = state.editingRecipeId
+    ? state.recipes.find(r => r.id === state.editingRecipeId)
+    : null;
 
   renderShell(`
     <h1>Recipes</h1>
@@ -283,11 +359,12 @@ function renderRecipes() {
       <button id="export-recipes-csv" class="ghost-button">Download CSV</button>
     </div>
     <div class="table-card"><table>
-      <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Recipe</th><th>Author</th>${hasPrice ? '<th>Price</th>' : ''}<th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>
-        ${rows.length ? rows.map(recipeRow).join('') : '<tr class="empty-row"><td colspan="5">No recipes match that search.</td></tr>'}
+        ${rows.length ? rows.map(recipeRow).join('') : `<tr class="empty-row"><td colspan="${colCount}">No recipes match that search.</td></tr>`}
       </tbody>
-    </table></div>`);
+    </table></div>
+    ${editing ? recipeEditModal(editing) : ''}`);
 }
 
 function renderAnalytics() {
@@ -547,18 +624,12 @@ const SETTINGS_SCHEMA = [
     ]
   },
   {
-    title: 'Notifications & Integrations',
-    items: [
-      { key: 'slack_webhook_url', label: 'Slack webhook URL', hint: 'Receives a message for every admin audit event.', type: 'secret', placeholder: 'https://hooks.slack.com/services/…', default: '' },
-      { key: 'discord_webhook_url', label: 'Discord webhook URL', hint: 'Alternative channel for audit notifications.', type: 'secret', placeholder: 'https://discord.com/api/webhooks/…', default: '' },
-      { key: 'daily_digest_email', label: 'Daily digest email', hint: 'Send admins a once-daily summary of activity.', type: 'toggle', default: false }
-    ]
-  },
-  {
     title: 'Plans & Billing Defaults',
     items: [
-      { key: 'plus_plan_price', label: 'Plus plan price ($/mo)', type: 'number', min: 0, step: 0.01, default: 4.99 },
-      { key: 'pro_plan_price', label: 'Pro plan price ($/mo)', type: 'number', min: 0, step: 0.01, default: 9.99 },
+      // All prices are in South African Rand (ZAR) -- stored as plain numbers,
+      // rendered with an "R" prefix by settingControl().
+      { key: 'plus_plan_price', label: 'Plus plan price (R/mo)', type: 'number', money: true, min: 0, step: 0.01, default: 89.99 },
+      { key: 'pro_plan_price', label: 'Pro plan price (R/mo)', type: 'number', money: true, min: 0, step: 0.01, default: 149.99 },
       { key: 'trial_length_days', label: 'Default trial length (days)', type: 'number', min: 0, default: 14 },
       { key: 'comp_everyone', label: 'Emergency: comp all accounts', hint: 'Treats every user as paid. Only flip this during an outage or migration.', type: 'toggle', danger: true, confirm: true, default: false }
     ]
@@ -772,16 +843,13 @@ document.addEventListener('click', event => {
     return loadAll();
   }
   
-  // Hide / unhide straight from the row -- no need to open the edit form.
+  // Hide / unhide straight from the row -- no need to open the edit popup.
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
     const nextShared = toggle.dataset.currentlyShared !== 'true';
     toggle.disabled = true;
-    authFetch(`/api/admin/recipes/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ is_shared: nextShared })
-    })
+    patchRecipe(id, { is_shared: nextShared })
     .then(({ recipe }) => {
       state.recipes = state.recipes.map(r => r.id === id
         ? { ...r, ...(recipe || {}), is_shared: recipe?.is_shared ?? nextShared }
@@ -798,68 +866,27 @@ document.addEventListener('click', event => {
     return;
   }
 
-  // OPEN / CLOSE a recipe's inline edit form
+  // OPEN a recipe's edit popup. Clicking the backdrop also closes it.
   const editBtn = event.target.closest('[data-edit-recipe]');
-  if (editBtn) {
-    const id = editBtn.dataset.editRecipe;
-    state.editingRecipeId = state.editingRecipeId === id ? null : id;
+  if (editBtn && !editBtn.closest('.modal')) {
+    state.editingRecipeId = editBtn.dataset.editRecipe;
     rerenderTab();
-    const openedRow = state.editingRecipeId && app.querySelector(`[data-edit-row="${state.editingRecipeId}"]`);
-    if (openedRow) openedRow.scrollIntoView({ block: 'nearest' });
+    const firstInput = app.querySelector('#recipe-edit-modal [data-edit-field]');
+    if (firstInput) firstInput.focus();
     return;
   }
 
-  if (event.target.closest('[data-cancel-edit]')) {
+  if (event.target.closest('[data-cancel-edit]') || event.target.id === 'recipe-edit-modal') {
     state.editingRecipeId = null;
     rerenderTab();
     return;
   }
 
-  // SAVE recipe edits -- only the fields that actually changed get sent
+  // SAVE recipe edits -- only the fields that actually changed get sent.
   const saveRecipe = event.target.closest('[data-save-recipe]');
-  if (saveRecipe) {
-    const id = saveRecipe.dataset.saveRecipe;
-    const original = state.recipes.find(r => r.id === id);
-    if (!original) return;
-    const container = saveRecipe.closest('.edit-form');
-
-    const payload = {};
-    RECIPE_EDIT_FIELDS.forEach(f => {
-      const input = container.querySelector(`[data-edit-field="${f.key}"]`);
-      if (!input) return;
-      const value = f.type === 'number'
-        ? (input.value === '' ? null : Number(input.value))
-        : input.value.trim();
-      // Compare against what the row actually holds right now, whichever of
-      // `is_shared` / `shared` this deployment uses.
-      if (value !== (original[f.key] ?? '')) payload[f.key] = value;
-    });
-
-    const sharedInput = container.querySelector('[data-edit-field="is_shared"]');
-    if (sharedInput && Boolean(sharedInput.checked) !== recipeShared(original)) {
-      payload.is_shared = sharedInput.checked;
-    }
-
-    if (!Object.keys(payload).length) {
-      showToast('Nothing to save');
-      return;
-    }
-
-    saveRecipe.disabled = true;
-    authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
-      .then(({ recipe }) => {
-        // Merge whatever the server confirmed over the cached row, so the table
-        // shows saved values without waiting for a full reload.
-        state.recipes = state.recipes.map(r => r.id === id ? { ...r, ...(recipe || payload) } : r);
-        state.editingRecipeId = null;
-        rerenderTab();
-        showToast('Recipe updated');
-        refreshAuditLog();
-      })
-      .catch(err => {
-        saveRecipe.disabled = false;
-        showToast(err.message);
-      });
+  if (saveRecipe && !saveRecipe.closest('form')) {
+    event.preventDefault();
+    submitRecipeForm(saveRecipe.dataset.saveRecipe, saveRecipe.closest('.edit-form'), saveRecipe);
     return;
   }
 
@@ -959,7 +986,58 @@ document.addEventListener('click', event => {
   }
 });
 
+// Collect the popup form's inputs and PATCH only the fields that changed.
+// `button` is optional (used to disable the control while the request runs).
+function submitRecipeForm(id, container, button) {
+  const original = state.recipes.find(r => r.id === id);
+  if (!original || !container) return;
+
+  const payload = {};
+  RECIPE_EDIT_FIELDS.forEach(f => {
+    const input = container.querySelector(`[data-edit-field="${f.key}"]`);
+    if (!input) return;
+    const value = f.type === 'number'
+      ? (input.value === '' ? null : Number(input.value))
+      : input.value.trim();
+    // Compare against what the row actually holds right now.
+    if (value !== (original[f.key] ?? '')) payload[f.key] = value;
+  });
+
+  const sharedInput = container.querySelector('[data-edit-field="is_shared"]');
+  if (sharedInput && Boolean(sharedInput.checked) !== recipeShared(original)) {
+    payload.is_shared = sharedInput.checked;
+  }
+
+  if (!Object.keys(payload).length) {
+    showToast('Nothing to save');
+    return;
+  }
+
+  if (button) button.disabled = true;
+  patchRecipe(id, payload)
+    .then(({ recipe }) => {
+      // Merge whatever the server confirmed over the cached row, so the table
+      // shows saved values without waiting for a full reload.
+      state.recipes = state.recipes.map(r => r.id === id ? { ...r, ...(recipe || payload) } : r);
+      state.editingRecipeId = null;
+      rerenderTab();
+      showToast('Recipe updated');
+      refreshAuditLog();
+    })
+    .catch(err => {
+      if (button) button.disabled = false;
+      showToast(err.message);
+    });
+}
+
 document.addEventListener('submit', event => {
+  // Recipe edit popup: submit via fetch instead of navigating.
+  if (event.target.closest('#recipe-edit-form')) {
+    event.preventDefault();
+    const form = event.target.closest('#recipe-edit-form');
+    submitRecipeForm(form.dataset.saveRecipe, form, form.querySelector('[type="submit"]'));
+    return;
+  }
   if (event.target.id !== 'admin-login') return;
   event.preventDefault();
   const form = new FormData(event.target);
