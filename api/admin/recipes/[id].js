@@ -21,6 +21,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Nothing to update' });
       }
 
+      // Read the row first so we can record which fields actually changed and
+      // what the recipe was called -- the audit list shows names, not UUIDs.
+      const { data: before } = await appData
+        .from('recipes')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
       const { data, error } = await appData
         .from('recipes')
         .update({ ...updates, updated_at: new Date().toISOString() })
@@ -29,7 +37,14 @@ export default async function handler(req, res) {
         .single();
       if (error) throw error;
 
-      await logAudit(admin.email, 'recipe_updated', { recipeId: id, changes: updates });
+      const changed = Object.fromEntries(
+        Object.entries(updates).filter(([key, value]) => before?.[key] !== value)
+      );
+      await logAudit(admin.email, 'recipe_updated', {
+        recipeId: id,
+        recipeName: before?.name || data?.name || null,
+        changes: Object.keys(changed).length ? changed : updates
+      });
       return res.status(200).json({ recipe: data });
     } catch (error) {
       return res.status(500).json({ error: error.message });
@@ -43,11 +58,14 @@ export default async function handler(req, res) {
       await appData.from('recipe_ratings').delete().eq('recipe_id', id);
       await appData.from('recipe_reports').delete().eq('recipe_id', id);
 
-      const { data, error } = await appData.from('recipes').delete().eq('id', id).select('id').single();
-      if (error) throw error;
-      if (!data) return res.status(404).json({ error: 'Recipe not found' });
+      // Name needed for the audit entry, so look it up before it's gone.
+      const { data: existing } = await appData.from('recipes').select('id, name').eq('id', id).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Recipe not found' });
 
-      await logAudit(admin.email, 'recipe_deleted', { recipeId: id });
+      const { error } = await appData.from('recipes').delete().eq('id', id);
+      if (error) throw error;
+
+      await logAudit(admin.email, 'recipe_deleted', { recipeId: id, recipeName: existing.name || null });
       return res.status(200).json({ deleted: true, id });
     } catch (error) {
       return res.status(500).json({ error: error.message });

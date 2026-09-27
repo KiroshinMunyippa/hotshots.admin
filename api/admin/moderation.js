@@ -36,12 +36,27 @@ export default async function handler(req, res) {
         const { error } = await appData.from('recipe_reports').update({ status: 'resolved' }).eq('id', reportId);
         if (error) throw error;
 
-        await logAudit(admin.email, 'report_dismissed', { reportId });
+        // Look up the recipe name (if it still exists) so the audit entry can
+        // read "Dismissed a report on \"Taco Soup\"" instead of a bare UUID.
+        let dismissedRecipeName = null;
+        try {
+          const { data: rep } = await appData
+            .from('recipe_reports')
+            .select('recipe:recipes(name)')
+            .eq('id', reportId)
+            .maybeSingle();
+          dismissedRecipeName = rep?.recipe?.name || null;
+        } catch { /* best-effort */ }
+
+        await logAudit(admin.email, 'report_dismissed', { reportId, recipeName: dismissedRecipeName });
         return res.status(200).json({ message: 'Report dismissed' });
       }
 
       if (action === 'delete_recipe') {
+        let deletedRecipeName = null;
         if (recipeId) {
+          const { data: doomed } = await appData.from('recipes').select('name').eq('id', recipeId).maybeSingle();
+          deletedRecipeName = doomed?.name || null;
           // Ratings/reports belong to the recipe, so clean them up first --
           // otherwise they are left pointing at a row that no longer exists.
           await appData.from('recipe_ratings').delete().eq('recipe_id', recipeId);
@@ -50,7 +65,7 @@ export default async function handler(req, res) {
         const { error } = await appData.from('recipe_reports').update({ status: 'resolved' }).eq('id', reportId);
         if (error) throw error;
 
-        await logAudit(admin.email, 'recipe_deleted_via_report', { recipeId: recipeId, reportId: reportId });
+        await logAudit(admin.email, 'recipe_deleted_via_report', { recipeId: recipeId, recipeName: deletedRecipeName, reportId: reportId });
 
         return res.status(200).json({ message: 'Recipe deleted and report resolved' });
       }

@@ -19,9 +19,11 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Nothing to update' });
       }
 
-      const before = await accountsAdmin
+      // Grab the current values first so the audit entry can show what changed
+      // (e.g. "Plan: Free -> Plus") rather than just the new payload.
+      const { data: before } = await accountsAdmin
         .from('profiles')
-        .select('subscription_plan, subscription_status')
+        .select('email, subscription_plan, subscription_status')
         .eq('id', id)
         .maybeSingle();
 
@@ -36,9 +38,12 @@ export default async function handler(req, res) {
       // Record the account change in the audit trail (best-effort).
       await logAudit(admin.email, 'user_updated', {
         userId: id,
-        email: data.email || null,
+        email: data.email || before?.email || null,
         changes: updates,
-        previous: before?.data || null
+        previous: before ? {
+          subscription_plan: before.subscription_plan,
+          subscription_status: before.subscription_status
+        } : null
       });
       res.status(200).json({ user: data });
     } catch (error) {
