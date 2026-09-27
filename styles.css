@@ -123,6 +123,12 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .edit-field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
 .edit-field.full { grid-column: 1 / -1; }
 .edit-field input, .edit-field textarea, .edit-field select { width: 100%; font-size: 13px; text-transform: none; letter-spacing: normal; }
+
+/* Image URL row in the recipe edit popup: file picker button + thumbnail. */
+.image-picker { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.ghost-button.small { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
+.image-preview { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); }
+.image-preview.hidden { display: none; }
 .edit-field textarea { resize: vertical; min-height: 64px; font-family: inherit; }
 .edit-field.check { flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--ink); }
 .edit-field.check input { width: auto; }
