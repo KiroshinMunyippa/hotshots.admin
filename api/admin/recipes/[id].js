@@ -1,43 +1,59 @@
-import { createClient } from '@supabase/supabase-js';
+import { verifyAdmin } from '../../../lib/verifyAdmin.js';
+import { appData } from '../../../lib/appData.js';
+import { logAudit } from '../logAudit.js';
+
+// Fields the admin is allowed to change on a recipe. `is_shared` is the
+// visibility toggle (show/hide in Explore); everything else is editable copy.
+const EDITABLE_FIELDS = ['name', 'description', 'category', 'cuisine', 'difficulty', 'prep_time', 'cook_time', 'servings', 'image_url', 'is_shared'];
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  const admin = await verifyAdmin(req);
+  if (!admin) return res.status(403).json({ error: 'Admin access required' });
 
-  const supabase = createClient(
-    process.env.SUPABASE_APPDATA_URL,
-    process.env.SUPABASE_APPDATA_SERVICE_KEY
-  );
+  const { id } = req.query;
 
-  try {
-    const { data: recipes, error } = await supabase
-      .from('recipes')
-      .select(`
-        *,
-        author:profiles!recipes_author_id (
-          display_name,
-          email
-        ),
-        rating:recipe_ratings (
-          rating
-        )
-      `)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    // Calculate rating totals
-    const recipesWithRatings = recipes.map(recipe => ({
-      ...recipe,
-      rating: {
-        total: recipe.rating?.reduce((sum, r) => sum + r.rating, 0) || 0,
-        count: recipe.rating?.length || 0
+  if (req.method === 'PATCH') {
+    try {
+      const updates = Object.fromEntries(
+        Object.entries(req.body || {}).filter(([key, value]) => EDITABLE_FIELDS.includes(key) && value !== undefined)
+      );
+      if (!Object.keys(updates).length) {
+        return res.status(400).json({ error: 'Nothing to update' });
       }
-    }));
 
-    res.status(200).json({ recipes: recipesWithRatings });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+      const { data, error } = await appData
+        .from('recipes')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      await logAudit(admin.email, 'recipe_updated', { recipeId: id, changes: updates });
+      return res.status(200).json({ recipe: data });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
   }
+
+  if (req.method === 'DELETE') {
+    try {
+      // Ratings belong to the recipe, so clean them up first -- otherwise they
+      // are left pointing at a row that no longer exists.
+      await appData.from('recipe_ratings').delete().eq('recipe_id', id);
+      await appData.from('recipe_reports').delete().eq('recipe_id', id);
+
+      const { data, error } = await appData.from('recipes').delete().eq('id', id).select('id').single();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Recipe not found' });
+
+      await logAudit(admin.email, 'recipe_deleted', { recipeId: id });
+      return res.status(200).json({ deleted: true, id });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  res.setHeader('Allow', 'PATCH, DELETE');
+  return res.status(405).end();
 }

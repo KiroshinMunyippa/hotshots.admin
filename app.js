@@ -16,13 +16,34 @@ const showToast = (message) => {
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
+// Shared <-> hidden is the same flag on the wire (is_shared); we just present
+// it to the admin as "Visible" / "Hidden".
+const visibilityBadge = (recipe) => recipe.is_shared
+  ? '<span class="badge shared-yes">Visible</span>'
+  : '<span class="badge shared-no">Hidden</span>';
+
+// The fields the inline edit form exposes. `text`/`number` inputs are one-liners,
+// `textarea` gets a full-width row. Values come straight off the API row.
+const RECIPE_EDIT_FIELDS = [
+  { key: 'name', label: 'Name', type: 'text' },
+  { key: 'category', label: 'Category', type: 'text' },
+  { key: 'cuisine', label: 'Cuisine', type: 'text' },
+  { key: 'difficulty', label: 'Difficulty', type: 'text' },
+  { key: 'prep_time', label: 'Prep time (min)', type: 'number' },
+  { key: 'cook_time', label: 'Cook time (min)', type: 'number' },
+  { key: 'servings', label: 'Servings', type: 'number' },
+  { key: 'image_url', label: 'Image URL', type: 'text', full: true },
+  { key: 'description', label: 'Description', type: 'textarea', full: true }
+];
+
 const state = {
   session: null, adminProfile: null, authChecked: false, authError: '',
   tab: 'users', 
   users: [], recipes: [], stats: null, analytics: null,
   // NEW: Add state for the new tabs
   moderation: [], audit: [], settings: null, 
-  userSearch: '', recipeSearch: '', loading: false
+  userSearch: '', recipeSearch: '', loading: false,
+  editingRecipeId: null   // id of the recipe whose inline edit form is open
 };
 
 async function authFetch(path, options = {}) {
@@ -141,35 +162,63 @@ function renderUsers() {
     </table></div>`);
 }
 
+// One row per recipe; when a row is being edited its edit form is rendered in
+// an extra <tr> directly underneath it.
+function recipeRow(r) {
+  const editing = state.editingRecipeId === r.id;
+
+  const fields = RECIPE_EDIT_FIELDS.map(f => {
+    const value = r[f.key] ?? '';
+    const input = f.type === 'textarea'
+      ? `<textarea data-edit-field="${f.key}" rows="3">${escapeHtml(value)}</textarea>`
+      : `<input type="${f.type}" data-edit-field="${f.key}" value="${escapeHtml(value)}">`;
+    return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${f.label}</span>${input}</label>`;
+  }).join('');
+
+  const editRow = editing ? `
+    <tr class="edit-row" data-edit-row="${r.id}">
+      <td colspan="5">
+        <div class="edit-form">
+          <div class="edit-grid">${fields}</div>
+          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${r.is_shared ? 'checked' : ''}><span>Visible in Explore</span></label>
+          <div class="edit-actions">
+            <button class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
+            <button class="icon-button" data-cancel-edit>Cancel</button>
+          </div>
+        </div>
+      </td>
+    </tr>` : '';
+
+  return `
+    <tr data-recipe-row="${r.id}" class="${editing ? 'is-editing' : ''}">
+      <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category || 'Uncategorised')}</small></td>
+      <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong></td>
+      <td>${visibilityBadge(r)}</td>
+      <td>${formatDate(r.created_at)}</td>
+      <td><div class="row-actions">
+        <button class="icon-button" data-edit-recipe="${r.id}">${editing ? 'Close' : 'Edit'}</button>
+        <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
+        <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
+      </div></td>
+    </tr>${editRow}`;
+}
+
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
   const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search) || r.author?.display_name?.toLowerCase().includes(search));
-  
+
   renderShell(`
     <h1>Recipes</h1>
-    <p class="main-subtitle">Every recipe across the app.</p>
+    <p class="main-subtitle">Every recipe across the app — edit details, hide it from Explore, or delete it.</p>
     ${statStrip()}
     <div class="toolbar">
       <input type="search" id="recipe-search" placeholder="Search by name or author" value="${escapeHtml(state.recipeSearch)}">
-      <!-- NEW EXPORT BUTTON -->
-      <button id="export-recipes-csv" style="margin-left: auto; padding: 8px 16px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); cursor: pointer;">
-        Download CSV
-      </button>
+      <button id="export-recipes-csv" class="ghost-button">Download CSV</button>
     </div>
     <div class="table-card"><table>
       <thead><tr><th>Recipe</th><th>Author</th><th>Visibility</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>
-        ${rows.length ? rows.map(r => `
-          <tr>
-            <td class="name-cell"><strong>${escapeHtml(r.name)}</strong><small>${escapeHtml(r.category)}</small></td>
-            <td class="name-cell"><strong>${escapeHtml(r.author?.display_name || 'Unknown')}</strong></td>
-            <td><span class="badge shared-${r.is_shared ? 'yes' : 'no'}">${r.is_shared ? 'Shared' : 'Private'}</span></td>
-            <td>${formatDate(r.created_at)}</td>
-            <td><div class="row-actions">
-              <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
-              <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
-            </div></td>
-          </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No recipes match that search.</td></tr>'}
+        ${rows.length ? rows.map(recipeRow).join('') : '<tr class="empty-row"><td colspan="5">No recipes match that search.</td></tr>'}
       </tbody>
     </table></div>`);
 }
@@ -318,6 +367,7 @@ document.addEventListener('click', event => {
   const tab = event.target.closest('[data-tab]');
   if (tab) { 
     state.tab = tab.dataset.tab; 
+    state.editingRecipeId = null;   // switching tabs closes any open edit form
     return render(); 
   }
   
@@ -359,29 +409,92 @@ document.addEventListener('click', event => {
       method: 'PATCH', 
       body: JSON.stringify({ is_shared: nextShared }) 
     })
-    .then(() => { 
-      state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: nextShared } : r); 
-      render(); 
-      showToast('Recipe updated'); 
+    .then(() => {
+      state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: nextShared } : r);
+      if (state.editingRecipeId === id) state.editingRecipeId = null;
+      render();
+      showToast(nextShared ? 'Recipe unhidden — visible in Explore' : 'Recipe hidden from Explore');
     })
     .catch(err => showToast(err.message));
+    return;
+  }
+
+  // OPEN / CLOSE a recipe's inline edit form
+  const editBtn = event.target.closest('[data-edit-recipe]');
+  if (editBtn) {
+    const id = editBtn.dataset.editRecipe;
+    state.editingRecipeId = state.editingRecipeId === id ? null : id;
+    return renderRecipes();
+  }
+
+  if (event.target.closest('[data-cancel-edit]')) {
+    state.editingRecipeId = null;
+    return renderRecipes();
+  }
+
+  // SAVE recipe edits -- only the fields that actually changed get sent
+  const saveRecipe = event.target.closest('[data-save-recipe]');
+  if (saveRecipe) {
+    const id = saveRecipe.dataset.saveRecipe;
+    const original = state.recipes.find(r => r.id === id);
+    if (!original) return;
+    const container = saveRecipe.closest('.edit-form');
+
+    const payload = {};
+    RECIPE_EDIT_FIELDS.forEach(f => {
+      const input = container.querySelector(`[data-edit-field="${f.key}"]`);
+      if (!input) return;
+      const value = f.type === 'number'
+        ? (input.value === '' ? null : Number(input.value))
+        : input.value.trim();
+      if (value !== original[f.key]) payload[f.key] = value;
+    });
+
+    const sharedInput = container.querySelector('[data-edit-field="is_shared"]');
+    if (sharedInput && Boolean(sharedInput.checked) !== Boolean(original.is_shared)) {
+      payload.is_shared = sharedInput.checked;
+    }
+
+    if (!Object.keys(payload).length) {
+      showToast('Nothing to save');
+      return;
+    }
+
+    saveRecipe.disabled = true;
+    authFetch(`/api/admin/recipes/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+      .then(({ recipe }) => {
+        // Merge whatever the server confirmed over the cached row, so the table
+        // shows saved values without waiting for a full reload.
+        state.recipes = state.recipes.map(r => r.id === id ? { ...r, ...(recipe || payload) } : r);
+        state.editingRecipeId = null;
+        render();
+        showToast('Recipe updated');
+      })
+      .catch(err => {
+        saveRecipe.disabled = false;
+        showToast(err.message);
+      });
     return;
   }
 
   const del = event.target.closest('[data-delete-recipe]');
   if (del) {
     const id = del.dataset.deleteRecipe;
-    if (!window.confirm('Delete this recipe?')) return;
+    const recipe = state.recipes.find(r => r.id === id);
+    const label = recipe ? `"${recipe.name}"` : 'this recipe';
+    if (!window.confirm(`Delete ${label}? This can't be undone.`)) return;
     authFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' })
-    .then(() => { 
-      state.recipes = state.recipes.filter(r => r.id !== id); 
-      render(); 
-      showToast('Recipe deleted'); 
+    .then(() => {
+      state.recipes = state.recipes.filter(r => r.id !== id);
+      if (state.editingRecipeId === id) state.editingRecipeId = null;
+      render();
+      showToast('Recipe deleted');
     })
     .catch(err => showToast(err.message));
     return;
   }
 });
+
 
 document.addEventListener('submit', event => {
   if (event.target.id !== 'admin-login') return;
