@@ -107,6 +107,30 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .env-item span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
 .env-item strong { display: block; margin-top: 3px; font-size: 12px; word-break: break-all; }
 
+/* ---------------------------------------------------------------------------
+   Recipe edit popup (modal)
+--------------------------------------------------------------------------- */
+.ghost-button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); font-size: 12px; font-weight: 600; }
+.ghost-button:hover { border-color: var(--acid); color: var(--acid); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.55); }
+.modal { width: 100%; max-width: 560px; max-height: calc(100vh - 40px); overflow-y: auto; padding: 20px 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.modal-head h2 { margin: 0; font-size: 16px; letter-spacing: -.3px; }
+.modal-close { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 20px; line-height: 1; }
+.modal-close:hover { background: var(--panel-2); color: var(--ink); }
+.edit-form { display: flex; flex-direction: column; gap: 14px; }
+.edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.edit-field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+.edit-field.full { grid-column: 1 / -1; }
+.edit-field input, .edit-field textarea, .edit-field select { width: 100%; font-size: 13px; text-transform: none; letter-spacing: normal; }
+.edit-field textarea { resize: vertical; min-height: 64px; font-family: inherit; }
+.edit-field.check { flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--ink); }
+.edit-field.check input { width: auto; }
+.input-affix { position: relative; display: block; }
+.input-affix .affix { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
+.input-affix input { padding-left: 26px; }
+.edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 @media (max-width: 720px) {
   /* Back to normal document flow on phones: sidebar becomes a top bar. */
   html, body { height: auto; }
@@ -119,4 +143,6 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
   .setting-row { flex-wrap: wrap; }
   .settings-card { padding: 14px; }
+  .edit-grid { grid-template-columns: 1fr; }
+  .modal { padding: 16px; }
 }
