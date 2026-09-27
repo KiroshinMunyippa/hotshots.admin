@@ -60,8 +60,15 @@ async function authFetch(path, options = {}) {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers || {}) }
   });
   const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
-  if (!response.ok) throw new Error(body.error || 'Something went wrong');
+  let body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    // Non-JSON error page (e.g. an HTML "An error occurred..." body): surface
+    // the status instead of dying with "JSON Parse error: Unexpected identifier".
+    throw new Error(`Server error ${response.status} on ${path}`);
+  }
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
 }
 
