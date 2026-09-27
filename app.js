@@ -16,6 +16,21 @@ const showToast = (message) => {
 
 const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 
+// Short "time ago" label for the audit log (falls back to a date beyond a week).
+const timeAgo = (iso) => {
+  if (!iso) return '—';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '—';
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return formatDate(iso);
+};
+
 // Shared <-> hidden is the same flag on the wire (is_shared); we just present
 // it to the admin as "Visible" / "Hidden".
 const visibilityBadge = (recipe) => recipeShared(recipe)
@@ -50,7 +65,9 @@ const state = {
   // Audit tab tell "still loading" apart from "loaded, but empty".
   auditLoaded: false,
   userSearch: '', recipeSearch: '', loading: false,
-  editingRecipeId: null   // id of the recipe whose inline edit form is open
+  editingRecipeId: null,   // id of the recipe whose inline edit form is open
+  // Lookups so the audit log can show names instead of raw UUIDs.
+  userById: {}, recipeById: {}
 };
 
 async function authFetch(path, options = {}) {
@@ -103,6 +120,10 @@ async function loadAll() {
   if (moderation) state.moderation = Array.isArray(moderation) ? moderation : (moderation.reports || []);
   if (audit)      state.audit = Array.isArray(audit) ? audit : (audit.logs || []);
   state.auditLoaded = true;
+  // Index users/recipes by id so the audit log can resolve "userId: <uuid>"
+  // into a human name.
+  state.userById = Object.fromEntries(state.users.map(u => [u.id, u]));
+  state.recipeById = Object.fromEntries(state.recipes.map(r => [r.id, r]));
   state.loading = false;
   render();
 }
@@ -355,16 +376,98 @@ function renderModeration() {
   `);
 }
 
-// Human-readable summary of an audit row. logAudit() writes {admin_email,
-// action, details}; older rows may use other shapes, so fall back gracefully.
-const auditDetails = (log) => {
-  const raw = log.details ?? log.metadata ?? null;
-  if (raw && typeof raw === 'object') return JSON.stringify(raw);
-  if (typeof raw === 'string' && raw.trim()) return raw;
-  const rest = Object.fromEntries(Object.entries(log).filter(([k]) =>
-    !['id', 'created_at', 'updated_at', 'action', 'event', 'details', 'metadata'].includes(k)));
-  return Object.keys(rest).length ? JSON.stringify(rest) : '\u2014';
+// Turn an audit row into one plain-language sentence + a short "what changed"
+// note. logAudit() writes {admin_email, action, details}; details carries the
+// ids/field names we resolve back to readable labels here. Anything unknown
+// degrades gracefully to the raw action name rather than a JSON blob.
+const HIDDEN_DETAIL_KEYS = ['userid', 'recipeid', 'reportid', 'email'];
+
+const fieldLabel = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+const planLabel = (v) => ({ free: 'Free', plus: 'Plus', pro: 'Pro' }[v] ?? v);
+const statusLabel = (v) => ({ active: 'Active', trialing: 'Trialing', past_due: 'Past due', canceled: 'Canceled' }[v] ?? v);
+
+const VALUE_LABELS = {
+  subscription_plan: planLabel,
+  subscription_status: statusLabel,
+  is_shared: (v) => (v ? 'Visible in Explore' : 'Hidden from Explore')
 };
+
+const describeValue = (key, value) => {
+  const label = VALUE_LABELS[key];
+  if (value === null || value === undefined || value === '') return 'cleared';
+  return label ? label(value) : String(value);
+};
+
+// "Plan: Free → Plus, Status: Active → Past due" style list of what changed.
+const changeSummary = (changes = {}, previous = {}) => Object.entries(changes)
+  .filter(([key]) => !HIDDEN_DETAIL_KEYS.includes(key.toLowerCase()))
+  .map(([key, value]) => {
+    const before = previous?.[key];
+    const from = before !== undefined && before !== null ? describeValue(key, before) : null;
+    const to = describeValue(key, value);
+    return `${fieldLabel(key)}: ${from && from !== to ? `${from} → ${to}` : to}`;
+  })
+  .join(', ');
+
+const truncate = (text, max = 80) => {
+  const s = String(text ?? '');
+  return s.length > max ? `${s.slice(0, max).trimEnd()}…` : s;
+};
+
+// Deleted recipes are no longer in the local list, so logAudit() also stores
+// the name alongside the id -- prefer that, then the cache, then a short id.
+const recipeNameFor = (id, storedName) => {
+  if (storedName) return storedName;
+  const cached = state.recipeById[id]?.name;
+  if (cached) return cached;
+  return id ? `Recipe ${String(id).slice(0, 8)}…` : 'a recipe';
+};
+const userLabelFor = (details) => {
+  const user = state.userById[details.userId];
+  if (user) return user.display_name || user.email || 'this account';
+  return details.email || (details.userId ? `User ${String(details.userId).slice(0, 8)}…` : 'an account');
+};
+
+// Returns { headline, detail } -- headline is the one-line summary, detail is
+// the optional smaller line beneath it (what actually changed / who did it).
+function summarizeAudit(log) {
+  const action = String(log.action || log.event || 'unknown');
+  let d = log.details ?? log.metadata ?? null;
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch { d = { note: d }; } }
+  d = d && typeof d === 'object' ? d : {};
+
+  const changes = d.changes || {};
+  switch (action) {
+    case 'user_updated':
+      return { headline: `Updated account “${userLabelFor(d)}”`, detail: changeSummary(changes, d.previous) || 'Subscription changes saved' };
+    case 'recipe_updated': {
+      const sharedOnly = Object.keys(changes).length === 1 && changes.is_shared !== undefined;
+      const name = recipeNameFor(d.recipeId, d.recipeName);
+      if (sharedOnly) {
+        return { headline: `${changes.is_shared ? 'Unhid' : 'Hid'} recipe “${name}”`, detail: changes.is_shared ? 'Now visible in Explore' : 'No longer visible in Explore' };
+      }
+      return { headline: `Edited recipe “${name}”`, detail: changeSummary(changes) || 'Recipe details updated' };
+    }
+    case 'recipe_deleted':
+      return { headline: `Deleted recipe “${recipeNameFor(d.recipeId, d.recipeName)}”`, detail: 'Ratings and reports removed too' };
+    case 'recipe_deleted_via_report':
+      return { headline: `Deleted recipe “${recipeNameFor(d.recipeId, d.recipeName)}” from a report`, detail: 'Report resolved too' };
+    case 'report_dismissed':
+      return { headline: `Dismissed a report${d.recipeName ? ` on “${d.recipeName}”` : ''}`, detail: 'Marked resolved' };
+    case 'report_status_changed':
+      return { headline: `Report marked ${d.status || 'updated'}`, detail: d.reportId ? `Report ${String(d.reportId).slice(0, 8)}…` : '' };
+    default: {
+      const fallbackDetail = changeSummary(
+        Object.fromEntries(Object.entries(d).filter(([k]) => !HIDDEN_DETAIL_KEYS.includes(k.toLowerCase())))
+      );
+      return {
+        headline: fieldLabel(action),
+        detail: fallbackDetail || (typeof d.note === 'string' ? truncate(d.note) : '')
+      };
+    }
+  }
+}
 
 function renderAudit() {
   // state.audit starts as [] and only stays empty if the request failed or
@@ -374,28 +477,22 @@ function renderAudit() {
 
   renderShell(`
     <h1>Audit Log</h1>
-    <p class="main-subtitle">Recent administrative actions and system events.</p>
-    ${loading ? '<p class="main-subtitle">Loading audit logs\u2026</p>' : `
-    <div class="table-card"><table>
-      <thead><tr><th>Timestamp</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead>
-      <tbody>
-        ${rows.length ? rows.map(log => `
-          <tr>
-            <td>
-              ${formatDate(log.created_at)}
-              <br><small style="color: var(--muted);">${log.created_at ? new Date(log.created_at).toLocaleTimeString() : ''}</small>
-            </td>
-            <td>${escapeHtml(log.admin_email || log.admin || '\u2014')}</td>
-            <td>
-              <span class="badge" style="background: var(--panel-2); text-transform: capitalize;">
-                ${escapeHtml((log.action || log.event || 'unknown').replace(/_/g, ' '))}
-              </span>
-            </td>
-            <td><small>${escapeHtml(auditDetails(log))}</small></td>
-          </tr>
-        `).join('') : '<tr class="empty-row"><td colspan="4">No audit logs found yet. They appear here as soon as you edit, hide or delete a recipe.</td></tr>'}
-      </tbody>
-    </table></div>`}
+    <p class="main-subtitle">Who changed what, most recent first.</p>
+    ${loading ? '<p class="main-subtitle">Loading audit logs…</p>' : `
+    <div class="table-card"><div class="audit-list">
+      ${rows.length ? rows.map(log => {
+        const { headline, detail } = summarizeAudit(log);
+        const who = log.admin_email || 'system';
+        return `
+          <div class="audit-item">
+            <span class="audit-when" title="${escapeHtml(log.created_at || '')}">${escapeHtml(timeAgo(log.created_at))}</span>
+            <span class="audit-what">
+              <strong>${escapeHtml(headline)}</strong>
+              <small class="audit-target">${detail ? `${escapeHtml(detail)} · ` : ''}${escapeHtml(who)}</small>
+            </span>
+          </div>`;
+      }).join('') : '<div class="audit-empty">No audit logs yet. They appear here as soon as you edit, hide or delete a recipe.</div>'}
+    </div></div>`}
   `);
 }
 

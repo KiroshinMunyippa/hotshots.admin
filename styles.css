@@ -9,8 +9,12 @@ body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--bg); }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: 0; background: none; }
 input, select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; color: var(--ink); }
-#app { display: flex; min-height: 100vh; }
-.sidebar { display: flex; flex-direction: column; width: 210px; flex: none; padding: 22px 14px; border-right: 1px solid var(--line); background: var(--panel); }
+/* Each pane scrolls on its own: #app is a fixed-height flex row, so page-level
+   scrolling never happens and the sidebar stays put while .main scrolls. */
+html, body { height: 100%; }
+body { overflow: hidden; }
+#app { display: flex; height: 100vh; }
+.sidebar { display: flex; flex-direction: column; width: 210px; flex: none; padding: 22px 14px; border-right: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .brand { margin: 0 0 26px; padding: 0 8px; font-size: 15px; font-weight: 700; letter-spacing: -.3px; }
 .brand span { color: var(--acid); }
 .side-nav { display: flex; flex-direction: column; gap: 3px; }
@@ -22,7 +26,8 @@ input, select { background: var(--panel-2); border: 1px solid var(--line); borde
 .admin-chip strong { display: block; color: var(--ink); font-size: 12px; }
 .sign-out-link { width: 100%; padding: 8px 10px; border-radius: 9px; color: var(--danger); font-size: 12px; font-weight: 600; text-align: left; }
 .sign-out-link:hover { background: rgba(224,100,90,.1); }
-.main { flex: 1; min-width: 0; padding: 28px 34px 60px; }
+/* The scrollable pane -- sidebar above stays fixed while this one scrolls. */
+.main { flex: 1; min-width: 0; padding: 28px 34px 60px; overflow-y: auto; height: 100vh; }
 .main h1 { margin: 0 0 4px; font-size: 21px; letter-spacing: -.4px; }
 .main-subtitle { margin: 0 0 22px; color: var(--muted); font-size: 13px; }
 .stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 26px; }
@@ -53,6 +58,14 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .icon-button.danger { color: var(--danger); border-color: rgba(224,100,90,.3); }
 .icon-button.save { color: var(--acid-ink); background: var(--acid); border-color: transparent; }
 .empty-row td { padding: 30px 14px; color: var(--muted); text-align: center; }
+/* Audit log: one plain-language line per entry instead of a raw JSON dump. */
+.audit-list { display: flex; flex-direction: column; }
+.audit-item { display: flex; gap: 16px; align-items: baseline; padding: 12px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.audit-item:last-child { border-bottom: none; }
+.audit-when { flex: none; width: 120px; color: var(--muted); font-size: 11px; }
+.audit-what { min-width: 0; }
+.audit-target { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.audit-empty { padding: 30px 14px; color: var(--muted); text-align: center; font-size: 13px; }
 .auth-shell { display: grid; place-items: center; min-height: 100vh; width: 100%; padding: 20px; }
 .auth-card { width: 100%; max-width: 340px; padding: 26px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
 .auth-card h1 { margin: 0 0 4px; font-size: 18px; }
@@ -65,10 +78,13 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .toast { position: fixed; bottom: 22px; left: 50%; z-index: 20; padding: 10px 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; opacity: 0; transform: translate(-50%, 8px); transition: opacity .25s, transform .25s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 @media (max-width: 720px) {
-  #app { flex-direction: column; }
-  .sidebar { flex-direction: row; width: 100%; overflow-x: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  /* Back to normal document flow on phones: sidebar becomes a top bar. */
+  html, body { height: auto; }
+  body { overflow: auto; }
+  #app { flex-direction: column; height: auto; }
+  .sidebar { position: static; flex-direction: row; width: 100%; height: auto; overflow-x: auto; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand, .sidebar-foot { display: none; }
   .side-nav { flex-direction: row; }
-  .main { padding: 20px; }
+  .main { height: auto; overflow: visible; padding: 20px; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
 }
