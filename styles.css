@@ -77,6 +77,36 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .auth-error, .locked-note { margin: 10px 0 0; padding: 9px 10px; border-radius: 8px; background: rgba(224,100,90,.12); color: var(--danger); font-size: 12px; line-height: 1.4; }
 .toast { position: fixed; bottom: 22px; left: 50%; z-index: 20; padding: 10px 16px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12px; opacity: 0; transform: translate(-50%, 8px); transition: opacity .25s, transform .25s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* ---------------------------------------------------------------------------
+   Settings tab
+--------------------------------------------------------------------------- */
+.settings-card { margin: 0 0 22px; padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.settings-card h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--acid); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.setting-row:last-child { border-bottom: none; }
+.setting-row-stack { flex-direction: column; align-items: stretch; }
+.setting-copy strong { display: block; font-size: 13px; }
+.setting-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.setting-input.narrow { width: 110px; flex: none; }
+.setting-input.wide { width: 100%; }
+.setting-note { display: block; margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.setting-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.secret-row { display: flex; gap: 8px; align-items: center; }
+.secret-row .setting-input { flex: 1; }
+/* Toggle switch */
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; border-radius: 22px; background: var(--panel-2); border: 1px solid var(--line); transition: background .15s ease; cursor: pointer; }
+.slider::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: var(--muted); transition: transform .15s ease, background .15s ease; }
+.switch input:checked + .slider { background: var(--acid); border-color: transparent; }
+.switch input:checked + .slider::before { transform: translateX(18px); background: var(--acid-ink); }
+.admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.admin-row:last-child { border-bottom: none; }
+.admin-row small { display: block; color: var(--muted); font-size: 11px; }
+.env-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.env-item span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.env-item strong { display: block; margin-top: 3px; font-size: 12px; word-break: break-all; }
+
 @media (max-width: 720px) {
   /* Back to normal document flow on phones: sidebar becomes a top bar. */
   html, body { height: auto; }
@@ -87,4 +117,6 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
   .side-nav { flex-direction: row; }
   .main { height: auto; overflow: visible; padding: 20px; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  .setting-row { flex-wrap: wrap; }
+  .settings-card { padding: 14px; }
 }
