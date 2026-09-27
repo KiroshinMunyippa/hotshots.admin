@@ -40,16 +40,31 @@ const timeAgo = (iso) => {
   return formatDate(iso);
 };
 
+// Shared <-> hidden is the same flag on the wire; different deployments of
+// the recipes table have called it `is_shared`, `shared`, `visible` or
+// `published`, so read whichever one is present (defaulting to visible).
+// `??` only skips null/undefined, so an explicit `false`/`0`/`"false"` still
+// means Hidden -- and unknown shapes fall back to Visible rather than
+// silently rendering an "Unhide" button on an already-hidden row.
+const SHARED_FLAG_FIELDS = ['is_shared', 'shared', 'visible', 'published'];
+const toBool = (v) => {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') return !['false', '0', 'no', ''].includes(v.trim().toLowerCase());
+  return Boolean(v);
+};
+const recipeShared = (recipe) => {
+  for (const key of SHARED_FLAG_FIELDS) {
+    if (recipe?.[key] !== undefined && recipe?.[key] !== null) return toBool(recipe[key]);
+  }
+  return true; // no visibility column at all -> treat as visible
+};
+
 // Shared <-> hidden is the same flag on the wire (is_shared); we just present
 // it to the admin as "Visible" / "Hidden".
 const visibilityBadge = (recipe) => recipeShared(recipe)
   ? '<span class="badge shared-yes">Visible</span>'
   : '<span class="badge shared-no">Hidden</span>';
-
-// Shared <-> hidden is the same flag on the wire; different deployments of
-// the recipes table have called it `is_shared` or `shared`, so read whichever
-// one is present (falling back to "visible").
-const recipeShared = (recipe) => Boolean(recipe.is_shared ?? recipe.shared ?? true);
 
 // Which column actually carries visibility for this deployment. Defaults to
 // `is_shared`; if a PATCH comes back saying that column doesn't exist on the
@@ -86,6 +101,8 @@ const state = {
   auditLoaded: false,
   userSearch: '', recipeSearch: '', loading: false,
   editingRecipeId: null,   // id of the recipe whose inline edit form is open
+  editingUserId: null,     // id of the user shown in the Users "Edit" popup
+  savingUserId: null,      // id whose save request is currently in flight
   // Lookups so the audit log can show names instead of raw UUIDs.
   userById: {}, recipeById: {}
 };
@@ -244,6 +261,11 @@ function rerenderTab() {
 function renderUsers() {
   const search = state.userSearch.trim().toLowerCase();
   const rows = state.users.filter(u => !search || u.display_name?.toLowerCase().includes(search) || u.email?.toLowerCase().includes(search));
+  // The Edit button opens a popup (see userEditModal), rendered after the
+  // table so it floats above everything.
+  const editingUser = state.editingUserId
+    ? state.users.find(u => u.id === state.editingUserId)
+    : null;
   
   renderShell(`
     <h1>Users</h1>
@@ -269,15 +291,87 @@ function renderUsers() {
               <select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
               <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
               <button class="icon-button save" data-save-user="${u.id}">Save</button>
+              <button class="icon-button" data-edit-user="${u.id}">Edit</button>
+              ${u.id === state.adminProfile?.id
+                ? ''
+                : `<button class="icon-button${u.is_admin ? ' danger' : ''}" data-flag-admin="${u.id}" data-flagged="${Boolean(u.is_admin)}">${u.is_admin ? 'Unflag' : 'Flag'}</button>`}
             </div></td>
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>'}
       </tbody>
-    </table></div>`);
+    </table></div>
+    ${editingUser ? userEditModal(editingUser) : ''}`);
 }
+
+// Users tab: "Flag"/"Unflag" grants or revokes admin access for an account.
+// Your own row has no button -- the server rejects self-changes anyway (see
+// toggleAdminFlag below).
+
+// The Users tab "Edit" popup: full account details (name, email, plan, status,
+// admin flag) in one form. Same modal markup/styling as the recipe editor.
+function userEditModal(u) {
+  const saving = state.savingUserId === u.id;
+  const fields = USER_EDIT_FIELDS.map(f => {
+    const raw = u[f.key] ?? '';
+    let input;
+    if (f.type === 'select') {
+      const options = userFieldOptions(f.key).map(([value, label]) =>
+        `<option value="${escapeHtml(String(value))}" ${String(raw) === String(value) ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+      input = `<select data-user-field="${f.key}"${f.key === 'is_admin' && u.id === state.adminProfile?.id ? ' disabled title="You cannot change your own admin flag"' : ''}>${options}</select>`;
+    } else {
+      input = `<input type="${f.type}" data-user-field="${f.key}" value="${escapeHtml(raw)}">`;
+    }
+    return `<label class="edit-field ${f.type === 'text' ? '' : 'full'}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
+  }).join('');
+
+  return `
+    <div class="modal-backdrop" id="user-edit-modal" data-modal-for="${u.id}">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Edit user">
+        <div class="modal-head">
+          <h2>Edit user</h2>
+          <button class="modal-close" data-cancel-user-edit aria-label="Close">&times;</button>
+        </div>
+        <form class="edit-form" id="user-edit-form" data-user-edit-for="${u.id}">
+          <div class="edit-grid">${fields}</div>
+          <p class="main-subtitle">Joined ${formatDate(u.created_at)}</p>
+          <div class="edit-actions">
+            <button type="submit" class="icon-button save" ${saving ? 'disabled' : ''}>${saving ? 'Saving…' : 'Save changes'}</button>
+            <button type="button" class="icon-button" data-cancel-user-edit>Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
+// The fields the Users "Edit" popup exposes. Display name / email are free
+// text; plan, status and the admin flag render as selects (see
+// userFieldOptions below for the choices).
+const USER_EDIT_FIELDS = [
+  { key: 'display_name', label: 'Display name', type: 'text' },
+  { key: 'email', label: 'Email', type: 'text' },
+  { key: 'subscription_plan', label: 'Plan', type: 'select' },
+  { key: 'subscription_status', label: 'Status', type: 'select' },
+  { key: 'is_admin', label: 'Admin access', type: 'select' }
+];
+
+const USER_PLAN_OPTIONS = [['free', 'Free'], ['plus', 'Plus'], ['pro', 'Pro']];
+const USER_STATUS_OPTIONS = [['active', 'Active'], ['trialing', 'Trialing'], ['past_due', 'Past due'], ['canceled', 'Canceled']];
+const USER_ADMIN_OPTIONS = [[false, 'Regular user'], [true, 'Administrator']];
+
+const userFieldOptions = (key) =>
+  key === 'subscription_plan' ? USER_PLAN_OPTIONS
+  : key === 'subscription_status' ? USER_STATUS_OPTIONS
+  : key === 'is_admin' ? USER_ADMIN_OPTIONS
+  : [];
 
 // Only show a Price column when at least one recipe actually carries a price --
 // most recipes are user-generated with no price at all.
 const anyRecipeHasPrice = () => state.recipes.some(r => r.price !== undefined && r.price !== null && r.price !== '');
+
+// Mirror the visibility flag across every name the schema might use, so the
+// cached row shows the right badge no matter which column this deployment has.
+const withSharedFlags = (recipe, shared) => Object.fromEntries(
+  SHARED_FLAG_FIELDS.map(key => [key, shared])
+);
 
 // One row per recipe. Editing happens in a popup (see recipeEditModal), so the
 // table rows stay compact and never get squashed by an inline form.
@@ -810,6 +904,7 @@ document.addEventListener('click', event => {
   if (tab) { 
     state.tab = tab.dataset.tab; 
     state.editingRecipeId = null;   // switching tabs closes any open edit form
+    state.editingUserId = null;
     return render(); 
   }
   
@@ -822,8 +917,11 @@ document.addEventListener('click', event => {
   if (saveUser) {
     const id = saveUser.dataset.saveUser;
     const row = saveUser.closest('[data-user-row]');
-    const plan = row.querySelector('[data-field="subscription_plan"]').value;
-    const status = row.querySelector('[data-field="subscription_status"]').value;
+    // The inline selects can be missing if the row re-rendered underneath us;
+    // fall back to what's cached so Save never throws.
+    const cached = state.users.find(u => u.id === id) || {};
+    const plan = row?.querySelector('[data-field="subscription_plan"]')?.value ?? cached.subscription_plan;
+    const status = row?.querySelector('[data-field="subscription_status"]')?.value ?? cached.subscription_status;
     authFetch(`/api/admin/users/${id}`, { 
       method: 'PATCH', 
       body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) 
@@ -837,6 +935,30 @@ document.addEventListener('click', event => {
     return;
   }
 
+  // USERS: flag/unflag an account from its row (kept in sync with Settings).
+  const flagBtn = event.target.closest('[data-flag-admin]');
+  if (flagBtn) {
+    toggleAdminFlag(flagBtn);
+    return;
+  }
+
+  // OPEN a user's edit popup (Users tab).
+  const editUserBtn = event.target.closest('[data-edit-user]');
+  if (editUserBtn && !editUserBtn.closest('.modal')) {
+    state.editingUserId = editUserBtn.dataset.editUser;
+    rerenderTab();
+    const firstInput = app.querySelector('#user-edit-modal [data-user-field]');
+    if (firstInput) firstInput.focus();
+    return;
+  }
+
+  // Close the user edit popup: Cancel, the × button, or a backdrop click.
+  if (event.target.closest('[data-cancel-user-edit]') || event.target.id === 'user-edit-modal') {
+    state.editingUserId = null;
+    rerenderTab();
+    return;
+  }
+
     // REFRESH DATA BUTTON
   if (event.target.id === 'refresh-data') {
     showToast('Refreshing data...');
@@ -847,13 +969,28 @@ document.addEventListener('click', event => {
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
-    const nextShared = toggle.dataset.currentlyShared !== 'true';
+    const recipe = state.recipes.find(r => r.id === id);
+    // Flip based on what the cached row actually says, not the stale data-*
+    // attribute (which can be out of sync after a failed/optimistic update).
+    const wasShared = recipe ? recipeShared(recipe) : toggle.dataset.currentlyShared === 'true';
+    const nextShared = !wasShared;
     toggle.disabled = true;
     patchRecipe(id, { is_shared: nextShared })
-    .then(({ recipe }) => {
-      state.recipes = state.recipes.map(r => r.id === id
-        ? { ...r, ...(recipe || {}), is_shared: recipe?.is_shared ?? nextShared }
-        : r);
+    .then(({ recipe: updated }) => {
+      // Trust the server's copy when it sent one, but make sure *every* alias
+      // of the flag matches -- otherwise recipeShared() could still read the
+      // old `shared`/`visible` value and the row would look unchanged.
+      state.recipes = state.recipes.map(r => {
+        if (r.id !== id) return r;
+        const merged = { ...r, ...(updated || {}) };
+        // Server copy wins if it carries a visibility flag; otherwise assume
+        // the PATCH succeeded and mirror `nextShared` across every alias --
+        // recipeShared() reads whichever column this deployment actually has.
+        const finalShared = updated && SHARED_FLAG_FIELDS.some(k => updated[k] != null)
+          ? recipeShared(updated)
+          : nextShared;
+        return { ...merged, ...withSharedFlags(merged, finalShared) };
+      });
       if (state.editingRecipeId === id) state.editingRecipeId = null;
       rerenderTab();
       showToast(nextShared ? 'Recipe unhidden \u2014 visible in Explore' : 'Recipe hidden from Explore');
@@ -912,7 +1049,7 @@ document.addEventListener('click', event => {
     return;
   }
 
-  // SETTINGS: remove an admin's access (never your own -- server enforces too).
+  // SETTINGS / USERS: remove an admin's access (never your own -- server enforces too).
   const revokeBtn = event.target.closest('[data-revoke-admin]');
   if (revokeBtn) {
     const id = revokeBtn.dataset.revokeAdmin;
@@ -1030,12 +1167,85 @@ function submitRecipeForm(id, container, button) {
     });
 }
 
+// USERS row "Flag"/"Unflag" button: grant or revoke admin access. The server
+// refuses to change your own flag, so that case is blocked here too (with a
+// friendlier message than the raw 400).
+function toggleAdminFlag(button) {
+  const id = button.dataset.flagAdmin;
+  const user = state.users.find(u => u.id === id);
+  const name = user?.display_name || user?.email || 'this account';
+  if (id === state.adminProfile?.id) {
+    showToast("You can't change your own admin flag");
+    return;
+  }
+  const next = !(user?.is_admin ?? button.dataset.flagged === 'true');
+  if (!next && !window.confirm(`Remove admin access from ${name}? They will be locked out of this dashboard.`)) return;
+  button.disabled = true;
+  authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ is_admin: next }) })
+    .then(({ user: updated }) => {
+      state.users = state.users.map(u => u.id === id ? { ...u, ...(updated || {}), is_admin: updated?.is_admin ?? next } : u);
+      rerenderTab();
+      showToast(next ? `${name} is now an admin` : `Admin access removed from ${name}`);
+      refreshAuditLog();
+    })
+    .catch(err => {
+      button.disabled = false;
+      showToast(err.message);
+    });
+}
+
+// Users edit popup: PATCH only the fields that actually changed.
+function submitUserForm(id, container, button) {
+  const original = state.users.find(u => u.id === id);
+  if (!original || !container) return;
+
+  const payload = {};
+  USER_EDIT_FIELDS.forEach(f => {
+    const input = container.querySelector(`[data-user-field="${f.key}"]`);
+    if (!input || input.disabled) return; // e.g. own admin select is locked
+    let value = input.value;
+    if (f.key === 'is_admin') value = value === 'true';
+    else if (typeof value === 'string') value = value.trim();
+    if (value !== undefined && value !== original[f.key]) payload[f.key] = value;
+  });
+
+  if (!Object.keys(payload).length) {
+    showToast('Nothing to save');
+    return;
+  }
+
+  state.savingUserId = id;
+  if (button) button.disabled = true;
+  rerenderTab();
+  authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+    .then(({ user }) => {
+      state.users = state.users.map(u => u.id === id ? { ...u, ...(user || payload) } : u);
+      state.editingUserId = null;
+      state.savingUserId = null;
+      rerenderTab();
+      showToast('User updated');
+      refreshAuditLog();
+    })
+    .catch(err => {
+      state.savingUserId = null;
+      rerenderTab();
+      showToast(err.message);
+    });
+}
+
 document.addEventListener('submit', event => {
   // Recipe edit popup: submit via fetch instead of navigating.
   if (event.target.closest('#recipe-edit-form')) {
     event.preventDefault();
     const form = event.target.closest('#recipe-edit-form');
     submitRecipeForm(form.dataset.saveRecipe, form, form.querySelector('[type="submit"]'));
+    return;
+  }
+  // User edit popup (Users tab).
+  if (event.target.closest('#user-edit-form')) {
+    event.preventDefault();
+    const form = event.target.closest('#user-edit-form');
+    submitUserForm(form.dataset.userEditFor, form, form.querySelector('[type="submit"]'));
     return;
   }
   if (event.target.id !== 'admin-login') return;
