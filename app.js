@@ -77,17 +77,17 @@ const isMissingColumnError = (err) => /does not exist|column .*not (?:be )?found
 
 // The fields the popup edit form exposes. `text`/`number` inputs are one-liners,
 // `textarea` gets a full-width row. Values come straight off the API row.
-// Money fields set `money: true` so they render with a "R" (Rand) prefix.
+// Cuisine and Price are intentionally not editable here -- they stay untouched
+// on the recipe row. `file: true` on Image URL adds a "Choose file" picker that
+// reads an image from the local PC and drops it into the field as a data URL.
 const RECIPE_EDIT_FIELDS = [
   { key: 'name', label: 'Name', type: 'text' },
   { key: 'category', label: 'Category', type: 'text' },
-  { key: 'cuisine', label: 'Cuisine', type: 'text' },
   { key: 'difficulty', label: 'Difficulty', type: 'text' },
-  { key: 'price', label: 'Price (R)', type: 'number', money: true, min: 0, step: 0.01 },
   { key: 'prep_time', label: 'Prep time (min)', type: 'number' },
   { key: 'cook_time', label: 'Cook time (min)', type: 'number' },
   { key: 'servings', label: 'Servings', type: 'number' },
-  { key: 'image_url', label: 'Image URL', type: 'text', full: true },
+  { key: 'image_url', label: 'Image URL', type: 'text', full: true, file: true },
   { key: 'description', label: 'Description', type: 'textarea', full: true }
 ];
 
@@ -408,6 +408,17 @@ function recipeEditModal(r) {
       input = `<span class="input-affix"><span class="affix">R</span><input type="number" data-edit-field="${f.key}" min="${f.min ?? 0}" step="${f.step ?? 1}" value="${escapeHtml(value)}"></span>`;
     } else {
       input = `<input type="${f.type}" data-edit-field="${f.key}"${f.min !== undefined ? ` min="${f.min}"` : ''}${f.step !== undefined ? ` step="${f.step}"` : ''} value="${escapeHtml(value)}">`;
+    }
+    // Image URL additionally gets a "choose from this PC" button plus a live
+    // thumbnail of whatever the field currently points at.
+    if (f.file) {
+      const isPreviewable = typeof value === 'string' && /^(https?:|data:image\/)/i.test(value);
+      input += `
+        <span class="image-picker">
+          <input type="file" accept="image/*" data-image-file="${f.key}" hidden>
+          <button type="button" class="ghost-button small" data-pick-image="${f.key}">Choose from PC…</button>
+          <img class="image-preview ${isPreviewable ? '' : 'hidden'}" data-image-preview="${f.key}" src="${isPreviewable ? escapeHtml(value) : ''}" alt="">
+        </span>`;
     }
     return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
   }).join('');
@@ -1003,6 +1014,14 @@ document.addEventListener('click', event => {
     return;
   }
 
+  // IMAGE URL: "Choose from PC" just opens the hidden file input next to it.
+  const pickImage = event.target.closest('[data-pick-image]');
+  if (pickImage) {
+    const fileInput = app.querySelector(`[data-image-file="${pickImage.dataset.pickImage}"]`);
+    if (fileInput) fileInput.click();
+    return;
+  }
+
   // OPEN a recipe's edit popup. Clicking the backdrop also closes it.
   const editBtn = event.target.closest('[data-edit-recipe]');
   if (editBtn && !editBtn.closest('.modal')) {
@@ -1280,10 +1299,52 @@ document.addEventListener('input', event => {
 // SETTINGS: every control saves as soon as it changes -- toggles instantly,
 // text/number/list inputs when the field loses focus or Enter is pressed.
 document.addEventListener('change', event => {
+  // Recipe edit popup: a local image picked from the PC gets read and dropped
+  // into the Image URL field (as a data URL) plus shown in the thumbnail.
+  const fileInput = event.target.closest('[data-image-file]');
+  if (fileInput) {
+    handleRecipeImagePick(fileInput);
+    return;
+  }
   const input = event.target.closest('[data-setting]');
   if (!input) return; // checkboxes fire change after flipping; text inputs on blur/Enter
   saveSetting(input);
 });
+
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // keep data URLs small enough to store
+
+// Read a locally-selected image file and feed it into the matching text field.
+function handleRecipeImagePick(fileInput) {
+  const key = fileInput.dataset.imageFile;
+  const field = app.querySelector(`[data-edit-field="${key}"]`);
+  const preview = app.querySelector(`[data-image-preview="${key}"]`);
+  const file = fileInput.files && fileInput.files[0];
+  if (!field || !file) return;
+
+  if (!file.type.startsWith('image/')) {
+    showToast('Please choose an image file');
+    fileInput.value = '';
+    return;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    showToast('Image too large — pick one under 2 MB');
+    fileInput.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result || '');
+    field.value = dataUrl;
+    if (preview) {
+      preview.src = dataUrl;
+      preview.classList.remove('hidden');
+    }
+    showToast('Image loaded — click Save changes to store it');
+  };
+  reader.onerror = () => showToast("Couldn't read that file");
+  reader.readAsDataURL(file);
+}
 
 function saveSetting(input) {
   const key = input.dataset.setting;
