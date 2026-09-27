@@ -105,20 +105,22 @@ const safeFetch = (path) => authFetch(path).catch(err => {
 
 async function loadAll() {
   state.loading = true; render();
-  const [usersRes, recipesRes, stats, analytics, moderation, audit] = await Promise.all([
+  const [usersRes, recipesRes, stats, analytics, moderation, audit, settingsRes] = await Promise.all([
     safeFetch('/api/admin/users'),
     safeFetch('/api/admin/recipes'),
     safeFetch('/api/admin/stats'),
     safeFetch('/api/admin/analytics'),
     safeFetch('/api/admin/moderation'),
-    safeFetch('/api/admin/audit')
+    safeFetch('/api/admin/audit'),
+    safeFetch('/api/admin/setting')
   ]);
   if (usersRes)   state.users = usersRes.users || [];
   if (recipesRes) state.recipes = recipesRes.recipes || [];
   if (stats)      state.stats = stats;
   if (analytics)  state.analytics = analytics;
   if (moderation) state.moderation = Array.isArray(moderation) ? moderation : (moderation.reports || []);
-  if (audit)      state.audit = Array.isArray(audit) ? audit : (audit.logs || []);
+  if (audit)        state.audit = Array.isArray(audit) ? audit : (audit.logs || []);
+  if (settingsRes)  state.settings = settingsRes;
   state.auditLoaded = true;
   // Index users/recipes by id so the audit log can resolve "userId: <uuid>"
   // into a human name.
@@ -415,6 +417,20 @@ const truncate = (text, max = 80) => {
   return s.length > max ? `${s.slice(0, max).trimEnd()}…` : s;
 };
 
+// Shared CSV download helper (Users tab + Settings audit export).
+function downloadCsv(rows, filename) {
+  const csvString = rows.map(row => row.join(',')).join('\n');
+  const blob = new Blob([csvString], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.setAttribute('hidden', '');
+  a.setAttribute('href', url);
+  a.setAttribute('download', filename);
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 // Deleted recipes are no longer in the local list, so logAudit() also stores
 // the name alongside the id -- prefer that, then the cache, then a short id.
 const recipeNameFor = (id, storedName) => {
@@ -457,6 +473,13 @@ function summarizeAudit(log) {
       return { headline: `Dismissed a report${d.recipeName ? ` on “${d.recipeName}”` : ''}`, detail: 'Marked resolved' };
     case 'report_status_changed':
       return { headline: `Report marked ${d.status || 'updated'}`, detail: d.reportId ? `Report ${String(d.reportId).slice(0, 8)}…` : '' };
+    case 'setting_updated': {
+      const raw = d.value;
+      const shown = typeof raw === 'string' ? truncate(raw, 40) : JSON.stringify(raw);
+      return { headline: `Changed setting “${fieldLabel(String(d.key || 'setting'))}”`, detail: shown ?? '' };
+    }
+    case 'audit_purged':
+      return { headline: `Purged old audit logs`, detail: `${d.removed ?? 0} entries older than ${d.olderThanDays ?? '?'} days removed` };
     default: {
       const fallbackDetail = changeSummary(
         Object.fromEntries(Object.entries(d).filter(([k]) => !HIDDEN_DETAIL_KEYS.includes(k.toLowerCase())))
@@ -496,6 +519,200 @@ function renderAudit() {
   `);
 }
 
+// ---------------------------------------------------------------------------
+// Settings tab
+// ---------------------------------------------------------------------------
+
+// Every setting we know about, grouped into cards. `key` maps to a row in the
+// app_settings table; `type` drives the control that gets rendered. Values are
+// stored as JSON in Postgres, so booleans/numbers arrive already parsed.
+const SETTINGS_SCHEMA = [
+  {
+    title: 'Feature Flags & App Config',
+    items: [
+      { key: 'explore_enabled', label: 'Explore page enabled', hint: 'Turn off to hide the community Explore feed everywhere.', type: 'toggle', default: true },
+      { key: 'registration_open', label: 'New sign-ups allowed', hint: 'Disable to stop anyone creating a HotShots account.', type: 'toggle', default: true },
+      { key: 'maintenance_mode', label: 'Maintenance mode', hint: 'Shows a maintenance banner in the main app. Use sparingly!', type: 'toggle', danger: true, default: false },
+      { key: 'free_recipe_limit', label: 'Free-tier recipe limit', hint: 'Max recipes a free user can save.', type: 'number', min: 0, default: 50 },
+      { key: 'max_upload_mb', label: 'Max image upload (MB)', hint: 'Upload size cap for recipe photos.', type: 'number', min: 1, default: 10 }
+    ]
+  },
+  {
+    title: 'Moderation Policies',
+    items: [
+      { key: 'autohide_report_threshold', label: 'Auto-hide after N reports', hint: 'Recipes with this many open reports get hidden automatically.', type: 'number', min: 1, default: 5 },
+      { key: 'require_email_verification', label: 'Require verified email to post', hint: 'Users must confirm their email before sharing recipes.', type: 'toggle', default: false },
+      { key: 'blocked_words', label: 'Blocked words', hint: 'Comma-separated list filtered from recipe names and descriptions.', type: 'list', default: [] },
+      { key: 'blocked_tags', label: 'Blocked tags', hint: 'Comma-separated tags nobody may attach to a recipe.', type: 'list', default: [] }
+    ]
+  },
+  {
+    title: 'Notifications & Integrations',
+    items: [
+      { key: 'slack_webhook_url', label: 'Slack webhook URL', hint: 'Receives a message for every admin audit event.', type: 'secret', placeholder: 'https://hooks.slack.com/services/…', default: '' },
+      { key: 'discord_webhook_url', label: 'Discord webhook URL', hint: 'Alternative channel for audit notifications.', type: 'secret', placeholder: 'https://discord.com/api/webhooks/…', default: '' },
+      { key: 'daily_digest_email', label: 'Daily digest email', hint: 'Send admins a once-daily summary of activity.', type: 'toggle', default: false }
+    ]
+  },
+  {
+    title: 'Plans & Billing Defaults',
+    items: [
+      { key: 'plus_plan_price', label: 'Plus plan price ($/mo)', type: 'number', min: 0, step: 0.01, default: 4.99 },
+      { key: 'pro_plan_price', label: 'Pro plan price ($/mo)', type: 'number', min: 0, step: 0.01, default: 9.99 },
+      { key: 'trial_length_days', label: 'Default trial length (days)', type: 'number', min: 0, default: 14 },
+      { key: 'comp_everyone', label: 'Emergency: comp all accounts', hint: 'Treats every user as paid. Only flip this during an outage or migration.', type: 'toggle', danger: true, confirm: true, default: false }
+    ]
+  }
+];
+
+const FLAT_SETTINGS = SETTINGS_SCHEMA.flatMap(group => group.items);
+
+// Read one setting value out of the fetched rows, falling back to the schema default.
+function getSetting(key) {
+  const row = (state.settings || []).find(s => s.key === key);
+  if (!row) {
+    const item = FLAT_SETTINGS.find(i => i.key === key);
+    return item ? item.default : undefined;
+  }
+  // The column is jsonb, so the driver may hand us a parsed value or a string.
+  if (typeof row.value === 'string') { try { return JSON.parse(row.value); } catch { return row.value; } }
+  return row.value;
+}
+
+function settingControl(item) {
+  const value = getSetting(item.key);
+  switch (item.type) {
+    case 'toggle':
+      return `
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
+          </div>
+          <label class="switch" title="${escapeHtml(item.key)}">
+            <input type="checkbox" data-setting="${item.key}" data-type="toggle" ${value ? 'checked' : ''} ${item.confirm ? 'data-confirm="true"' : ''}>
+            <span class="slider"></span>
+          </label>
+        </div>`;
+    case 'number':
+      return `
+        <div class="setting-row">
+          <div class="setting-copy">
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
+          </div>
+          <input class="setting-input narrow" type="number" data-setting="${item.key}" data-type="number"
+                 min="${item.min ?? 0}" step="${item.step ?? 1}" value="${escapeHtml(value ?? '')}">
+        </div>`;
+    case 'list': {
+      const asText = Array.isArray(value) ? value.join(', ') : (value ?? '');
+      return `
+        <div class="setting-row setting-row-stack">
+          <div class="setting-copy">
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
+          </div>
+          <input class="setting-input wide" type="text" data-setting="${item.key}" data-type="list"
+                 placeholder="word one, word two, tag" value="${escapeHtml(asText)}">
+        </div>`;
+    }
+    case 'secret':
+      return `
+        <div class="setting-row setting-row-stack">
+          <div class="setting-copy">
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
+          </div>
+          <div class="secret-row">
+            <input class="setting-input wide" type="password" data-setting="${item.key}" data-type="text"
+                   placeholder="${escapeHtml(item.placeholder || 'Not set')}" value="${escapeHtml(value ?? '')}">
+            <button type="button" class="icon-button" data-reveal-secret="${item.key}">Show</button>
+          </div>
+        </div>`;
+    default:
+      return `
+        <div class="setting-row setting-row-stack">
+          <div class="setting-copy"><strong>${escapeHtml(item.label)}</strong></div>
+          <input class="setting-input wide" type="text" data-setting="${item.key}" data-type="text" value="${escapeHtml(value ?? '')}">
+        </div>`;
+  }
+}
+
+function maskedUrl(url) {
+  if (!url) return 'not set';
+  try {
+    const u = new URL(url);
+    const last = u.pathname.split('/').filter(Boolean).pop() || '';
+    return `${u.host}/…${last.slice(-4)}`;
+  } catch {
+    return `${String(url).slice(0, 12)}…`;
+  }
+}
+
+function renderSettings() {
+  const groups = SETTINGS_SCHEMA.map(group => `
+    <section class="settings-card">
+      <h2>${escapeHtml(group.title)}</h2>
+      ${group.items.map(settingControl).join('')}
+    </section>`).join('');
+
+  const admins = state.users.filter(u => u.is_admin);
+  const adminRows = admins.length ? admins.map(a => `
+      <div class="admin-row">
+        <div class="name-cell"><strong>${escapeHtml(a.display_name || 'Admin')}</strong><small>${escapeHtml(a.email || '')}</small></div>
+        ${a.id === state.session?.user?.id
+          ? '<span class="badge shared-yes">You</span>'
+          : `<button class="icon-button danger" data-revoke-admin="${a.id}" data-admin-name="${escapeHtml(a.display_name || a.email || '')}">Remove admin</button>`}
+      </div>`).join('')
+    : '<p class="main-subtitle">No other admins found.</p>';
+
+  const retentionDays = Number(getSetting('audit_retention_days') ?? 90);
+  const oldest = state.audit.length ? state.audit[state.audit.length - 1]?.created_at : null;
+
+  const envRows = [
+    ['Signed in as', `${state.adminProfile?.display_name || 'Admin'} (${state.adminProfile?.email || ''})`],
+    ['Accounts project', maskedUrl(SUPABASE_ACCOUNTS_URL)],
+    ['API base', API_BASE || '(same origin)'],
+    ['Audit entries loaded', String(state.audit.length)]
+  ];
+
+  renderShell(`
+    <h1>Settings</h1>
+    <p class="main-subtitle">App-wide configuration, stored in <code>app_settings</code>. Changes save instantly and land in the audit log.</p>
+    ${groups}
+
+    <section class="settings-card">
+      <h2>Audit Log Management</h2>
+      <div class="setting-row">
+        <div class="setting-copy">
+          <strong>Log retention (days)</strong>
+          <small>Entries older than this can be purged. Currently loaded: ${state.audit.length}${oldest ? `, oldest: ${formatDate(oldest)}` : ''}.</small>
+        </div>
+        <input class="setting-input narrow" type="number" min="1" data-setting="audit_retention_days" data-type="number" value="${escapeHtml(retentionDays)}">
+      </div>
+      <div class="setting-actions">
+        <button class="icon-button" id="export-audit-csv">Export logs CSV</button>
+        <button class="icon-button" id="refresh-audit-only">Refresh cache</button>
+        <button class="icon-button danger" id="purge-audit-old">Purge old logs</button>
+      </div>
+      <small class="setting-note">Purging deletes audit entries older than the retention window above. This cannot be undone.</small>
+    </section>
+
+    <section class="settings-card">
+      <h2>Admin Access</h2>
+      <small class="setting-note">Everyone currently flagged as an administrator. Removing access takes effect at their next request.</small>
+      ${adminRows}
+    </section>
+
+    <section class="settings-card">
+      <h2>Environment Info</h2>
+      <div class="env-grid">
+        ${envRows.map(([k, v]) => `<div class="env-item"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join('')}
+      </div>
+    </section>
+  `);
+}
+
 function render() {
   if (!state.session) return renderAuth();
   if (!state.authChecked) { 
@@ -509,7 +726,7 @@ function render() {
   }
   
   // NEW: Add placeholders for the new tabs
-  if (state.tab === 'settings') return renderShell('<h1>Settings</h1><p class="main-subtitle">App configuration coming soon.</p>');
+  if (state.tab === 'settings') return renderSettings();
    if (state.tab === 'audit') return renderAudit();
   if (state.tab === 'moderation') return renderModeration();
   if (state.tab === 'analytics') return renderAnalytics();
@@ -667,6 +884,79 @@ document.addEventListener('click', event => {
     });
     return;
   }
+
+  // SETTINGS: remove an admin's access (never your own -- server enforces too).
+  const revokeBtn = event.target.closest('[data-revoke-admin]');
+  if (revokeBtn) {
+    const id = revokeBtn.dataset.revokeAdmin;
+    const name = revokeBtn.dataset.adminName || 'this account';
+    if (!window.confirm(`Remove admin access from ${name}? They will be locked out of this dashboard.`)) return;
+    revokeBtn.disabled = true;
+    authFetch(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ is_admin: false }) })
+      .then(() => {
+        state.users = state.users.map(u => u.id === id ? { ...u, is_admin: false } : u);
+        rerenderTab();
+        showToast(`Admin access removed from ${name}`);
+        refreshAuditLog();
+      })
+      .catch(err => {
+        revokeBtn.disabled = false;
+        showToast(err.message);
+      });
+    return;
+  }
+
+  // SETTINGS: reveal / hide a secret input (webhook URLs etc.)
+  const revealBtn = event.target.closest('[data-reveal-secret]');
+  if (revealBtn) {
+    const input = app.querySelector(`[data-setting="${revealBtn.dataset.revealSecret}"]`);
+    if (input) {
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      revealBtn.textContent = showing ? 'Show' : 'Hide';
+    }
+    return;
+  }
+
+  // SETTINGS: export the loaded audit log as CSV
+  if (event.target.id === 'export-audit-csv') {
+    if (!state.audit.length) { showToast('No audit logs to export'); return; }
+    const headers = ['Timestamp', 'Admin', 'Action', 'Details'];
+    const csvRows = state.audit.map(log => [
+      log.created_at || '',
+      `"${(log.admin_email || '').replace(/"/g, '""')}"`,
+      log.action || '',
+      `"${JSON.stringify(log.details ?? {}).replace(/"/g, '""')}"`
+    ]);
+    downloadCsv([headers, ...csvRows], 'hotshots_audit_log.csv');
+    showToast('Audit log exported');
+    return;
+  }
+
+  // SETTINGS: re-fetch just the audit list ("refresh cache")
+  if (event.target.id === 'refresh-audit-only') {
+    showToast('Refreshing audit log…');
+    refreshAuditLog().then(() => { if (state.tab === 'settings') render(); });
+    return;
+  }
+
+  // SETTINGS: purge audit entries older than the retention window
+  if (event.target.id === 'purge-audit-old') {
+    const days = Number(getSetting('audit_retention_days') ?? 90);
+    if (!Number.isFinite(days) || days < 1) { showToast('Set a valid retention window first'); return; }
+    if (!window.confirm(`Delete all audit logs older than ${days} days? This cannot be undone.`)) return;
+    event.target.disabled = true;
+    authFetch(`/api/admin/audit?olderThanDays=${encodeURIComponent(days)}`, { method: 'DELETE' })
+      .then(({ removed }) => {
+        showToast(`Purged ${removed ?? 0} old audit entries`);
+        refreshAuditLog().then(() => { if (state.tab === 'settings') render(); });
+      })
+      .catch(err => {
+        event.target.disabled = false;
+        showToast(err.message);
+      });
+    return;
+  }
 });
 
 document.addEventListener('submit', event => {
@@ -698,6 +988,54 @@ document.addEventListener('input', event => {
     return rerenderTab(); 
   }
 });
+
+// SETTINGS: every control saves as soon as it changes -- toggles instantly,
+// text/number/list inputs when the field loses focus or Enter is pressed.
+document.addEventListener('change', event => {
+  const input = event.target.closest('[data-setting]');
+  if (!input) return; // checkboxes fire change after flipping; text inputs on blur/Enter
+  saveSetting(input);
+});
+
+function saveSetting(input) {
+  const key = input.dataset.setting;
+  const type = input.dataset.type;
+  let value;
+  if (type === 'toggle') {
+    value = input.checked;
+    if (input.dataset.confirm === 'true' && value) {
+      if (!window.confirm(`"${input.closest('.setting-row')?.querySelector('strong')?.textContent || key}" is an emergency switch. Turn it ON?`)) {
+        input.checked = false;
+        return;
+      }
+    }
+  } else if (type === 'number') {
+    value = input.value === '' ? null : Number(input.value);
+    if (value !== null && Number.isNaN(value)) { showToast('Enter a number'); return; }
+  } else if (type === 'list') {
+    value = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  } else {
+    value = input.value.trim();
+  }
+
+  input.disabled = true;
+  authFetch('/api/admin/setting', { method: 'PATCH', body: JSON.stringify({ key, value }) })
+    .then((row) => {
+      // Update the local cache so a re-render shows the saved value.
+      const rows = state.settings || [];
+      const idx = rows.findIndex(s => s.key === key);
+      if (idx >= 0) rows[idx] = row; else rows.push(row);
+      state.settings = rows;
+      showToast(`${fieldLabel(key)} saved`);
+      refreshAuditLog();
+    })
+    .catch(err => {
+      showToast(err.message);
+      if (type === 'toggle') input.checked = !input.checked; // revert the switch
+      else render(); // restore the stored value in the input
+    })
+    .finally(() => { input.disabled = false; });
+}
 
 supabase.auth.onAuthStateChange(async (_event, newSession) => {
   const wasSignedIn = Boolean(state.session);

@@ -9,12 +9,23 @@ export default async function handler(req, res) {
 
   if (req.method === 'PATCH') {
     try {
-      const { subscription_plan, subscription_status } = req.body || {};
+      const { subscription_plan, subscription_status, is_admin } = req.body || {};
       // Only send the fields that were actually provided, so a partial update
       // doesn't blank out the other one.
       const updates = Object.fromEntries(
-        Object.entries({ subscription_plan, subscription_status }).filter(([, v]) => v !== undefined)
+        Object.entries({ subscription_plan, subscription_status, is_admin }).filter(([, v]) => v !== undefined)
       );
+      // Admin flags may only be changed by an admin (verifyAdmin already
+      // guarantees the caller is one) -- and never your own, or the last admin
+      // could lock everyone out of the dashboard.
+      if ('is_admin' in updates) {
+        if (updates.is_admin !== true && updates.is_admin !== false) {
+          return res.status(400).json({ error: 'is_admin must be true or false' });
+        }
+        if (id === admin.id) {
+          return res.status(400).json({ error: 'You cannot change your own admin flag' });
+        }
+      }
       if (!Object.keys(updates).length) {
         return res.status(400).json({ error: 'Nothing to update' });
       }
@@ -23,7 +34,7 @@ export default async function handler(req, res) {
       // (e.g. "Plan: Free -> Plus") rather than just the new payload.
       const { data: before } = await accountsAdmin
         .from('profiles')
-        .select('email, subscription_plan, subscription_status')
+        .select('email, display_name, subscription_plan, subscription_status, is_admin')
         .eq('id', id)
         .maybeSingle();
 
@@ -42,7 +53,8 @@ export default async function handler(req, res) {
         changes: updates,
         previous: before ? {
           subscription_plan: before.subscription_plan,
-          subscription_status: before.subscription_status
+          subscription_status: before.subscription_status,
+          is_admin: before.is_admin
         } : null
       });
       res.status(200).json({ user: data });
