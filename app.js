@@ -18,9 +18,14 @@ const formatDate = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { 
 
 // Shared <-> hidden is the same flag on the wire (is_shared); we just present
 // it to the admin as "Visible" / "Hidden".
-const visibilityBadge = (recipe) => recipe.is_shared
+const visibilityBadge = (recipe) => recipeShared(recipe)
   ? '<span class="badge shared-yes">Visible</span>'
   : '<span class="badge shared-no">Hidden</span>';
+
+// Shared <-> hidden is the same flag on the wire; different deployments of
+// the recipes table have called it `is_shared` or `shared`, so read whichever
+// one is present (falling back to "visible").
+const recipeShared = (recipe) => Boolean(recipe.is_shared ?? recipe.shared ?? true);
 
 // The fields the inline edit form exposes. `text`/`number` inputs are one-liners,
 // `textarea` gets a full-width row. Values come straight off the API row.
@@ -40,8 +45,10 @@ const state = {
   session: null, adminProfile: null, authChecked: false, authError: '',
   tab: 'users', 
   users: [], recipes: [], stats: null, analytics: null,
-  // NEW: Add state for the new tabs
-  moderation: [], audit: [], settings: null, 
+  moderation: [], audit: [], settings: null,
+  // true once /api/admin/audit has answered (successfully or not) -- lets the
+  // Audit tab tell "still loading" apart from "loaded, but empty".
+  auditLoaded: false,
   userSearch: '', recipeSearch: '', loading: false,
   editingRecipeId: null   // id of the recipe whose inline edit form is open
 };
@@ -63,29 +70,45 @@ async function checkAdmin() {
   state.adminProfile = data || null;
   state.authChecked = true;
 }
+// One request per dataset, each resolving to null on failure instead of
+// rejecting -- so one missing table (e.g. audit_logs not created yet) no
+// longer blanks out the entire dashboard or leaves a tab stuck on
+// "Loading...".
+const safeFetch = (path) => authFetch(path).catch(err => {
+  console.warn(`[admin] ${path} failed:`, err.message);
+  return null;
+});
+
 async function loadAll() {
   state.loading = true; render();
-  try {
-    const [{ users }, { recipes }, stats, analytics] = await Promise.all([ // removed moderation, audit
-      authFetch('/api/admin/users'), 
-      authFetch('/api/admin/recipes'), 
-      authFetch('/api/admin/stats'),
-      authFetch('/api/admin/analytics')
-      // authFetch('/api/admin/moderation'), // <-- Temporarily disabled
-      // authFetch('/api/admin/audit')       // <-- Temporarily disabled
-    ]);
-    state.users = users; 
-    state.recipes = recipes; 
-    state.stats = stats;
-    state.analytics = analytics;
-    // state.moderation = moderation; // <-- Temporarily disabled
-    // state.audit = audit;           // <-- Temporarily disabled
-  } catch (err) { 
-    showToast(err.message); 
-  }
-  state.loading = false; 
+  const [usersRes, recipesRes, stats, analytics, moderation, audit] = await Promise.all([
+    safeFetch('/api/admin/users'),
+    safeFetch('/api/admin/recipes'),
+    safeFetch('/api/admin/stats'),
+    safeFetch('/api/admin/analytics'),
+    safeFetch('/api/admin/moderation'),
+    safeFetch('/api/admin/audit')
+  ]);
+  if (usersRes)   state.users = usersRes.users || [];
+  if (recipesRes) state.recipes = recipesRes.recipes || [];
+  if (stats)      state.stats = stats;
+  if (analytics)  state.analytics = analytics;
+  if (moderation) state.moderation = Array.isArray(moderation) ? moderation : (moderation.reports || []);
+  if (audit)      state.audit = Array.isArray(audit) ? audit : (audit.logs || []);
+  state.auditLoaded = true;
+  state.loading = false;
   render();
 }
+
+// The audit trail is best-effort: a failed log write must never surface as an
+// error toast on top of an action that actually succeeded.
+const refreshAuditLog = () => safeFetch('/api/admin/audit')
+  .then(res => {
+    if (res) state.audit = Array.isArray(res) ? res : (res.logs || []);
+    state.auditLoaded = true;
+    if (state.tab === 'audit') render();
+  })
+  .catch(() => {});
 
 function renderAuth() {
   app.innerHTML = `<div class="auth-shell"><div class="auth-card"><h1>HotShots Admin</h1><p>Sign in with an account flagged as an administrator.</p><form id="admin-login"><div class="field"><label for="admin-email">Email</label><input id="admin-email" name="email" type="email" required autocomplete="email"></div><div class="field"><label for="admin-password">Password</label><input id="admin-password" name="password" type="password" required autocomplete="current-password"></div>${state.authError ? `<p class="auth-error">${escapeHtml(state.authError)}</p>` : ''}<button class="primary-button" type="submit">Sign in</button></form></div></div>`;
@@ -126,6 +149,16 @@ function renderShell(content) {
     </div>
   </aside>
   <main class="main">${content}</main>`;
+}
+
+// Re-render the current tab without throwing away where the user had scrolled
+// in the right-hand pane (innerHTML replacement resets it to the top).
+function rerenderTab() {
+  const main = app.querySelector('.main');
+  const scrollTop = main ? main.scrollTop : 0;
+  render();
+  const newMain = app.querySelector('.main');
+  if (newMain) newMain.scrollTop = scrollTop;
 }
 
 function renderUsers() {
@@ -175,12 +208,14 @@ function recipeRow(r) {
     return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${f.label}</span>${input}</label>`;
   }).join('');
 
+  const shared = recipeShared(r);
+
   const editRow = editing ? `
     <tr class="edit-row" data-edit-row="${r.id}">
       <td colspan="5">
         <div class="edit-form">
           <div class="edit-grid">${fields}</div>
-          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${r.is_shared ? 'checked' : ''}><span>Visible in Explore</span></label>
+          <label class="edit-field check"><input type="checkbox" data-edit-field="is_shared" ${shared ? 'checked' : ''}><span>Visible in Explore</span></label>
           <div class="edit-actions">
             <button class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
             <button class="icon-button" data-cancel-edit>Cancel</button>
@@ -197,7 +232,7 @@ function recipeRow(r) {
       <td>${formatDate(r.created_at)}</td>
       <td><div class="row-actions">
         <button class="icon-button" data-edit-recipe="${r.id}">${editing ? 'Close' : 'Edit'}</button>
-        <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${r.is_shared}">${r.is_shared ? 'Hide' : 'Unhide'}</button>
+        <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${shared}">${shared ? 'Hide' : 'Unhide'}</button>
         <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
       </div></td>
     </tr>${editRow}`;
@@ -205,7 +240,9 @@ function recipeRow(r) {
 
 function renderRecipes() {
   const search = state.recipeSearch.trim().toLowerCase();
-  const rows = state.recipes.filter(r => !search || r.name.toLowerCase().includes(search) || r.author?.display_name?.toLowerCase().includes(search));
+  const rows = state.recipes.filter(r => !search
+    || r.name?.toLowerCase().includes(search)
+    || r.author?.display_name?.toLowerCase().includes(search));
 
   renderShell(`
     <h1>Recipes</h1>
@@ -311,34 +348,47 @@ function renderModeration() {
   `);
 }
 
+// Human-readable summary of an audit row. logAudit() writes {admin_email,
+// action, details}; older rows may use other shapes, so fall back gracefully.
+const auditDetails = (log) => {
+  const raw = log.details ?? log.metadata ?? null;
+  if (raw && typeof raw === 'object') return JSON.stringify(raw);
+  if (typeof raw === 'string' && raw.trim()) return raw;
+  const rest = Object.fromEntries(Object.entries(log).filter(([k]) =>
+    !['id', 'created_at', 'updated_at', 'action', 'event', 'details', 'metadata'].includes(k)));
+  return Object.keys(rest).length ? JSON.stringify(rest) : '\u2014';
+};
+
 function renderAudit() {
-  if (!state.audit) {
-    renderShell('<p class="main-subtitle">Loading audit logs...</p>');
-    return;
-  }
+  // state.audit starts as [] and only stays empty if the request failed or
+  // there genuinely are no logs -- never leave the tab stuck on "Loading".
+  const loading = state.loading && !state.auditLoaded;
+  const rows = state.audit || [];
 
   renderShell(`
     <h1>Audit Log</h1>
     <p class="main-subtitle">Recent administrative actions and system events.</p>
+    ${loading ? '<p class="main-subtitle">Loading audit logs\u2026</p>' : `
     <div class="table-card"><table>
-      <thead><tr><th>Timestamp</th><th>Action</th><th>Details</th></tr></thead>
+      <thead><tr><th>Timestamp</th><th>Admin</th><th>Action</th><th>Details</th></tr></thead>
       <tbody>
-        ${state.audit.length ? state.audit.map(log => `
+        ${rows.length ? rows.map(log => `
           <tr>
             <td>
-              ${formatDate(log.created_at)} 
-              <br><small style="color: var(--muted);">${new Date(log.created_at).toLocaleTimeString()}</small>
+              ${formatDate(log.created_at)}
+              <br><small style="color: var(--muted);">${log.created_at ? new Date(log.created_at).toLocaleTimeString() : ''}</small>
             </td>
+            <td>${escapeHtml(log.admin_email || log.admin || '\u2014')}</td>
             <td>
               <span class="badge" style="background: var(--panel-2); text-transform: capitalize;">
-                ${escapeHtml(log.action || log.event || 'unknown')}
+                ${escapeHtml((log.action || log.event || 'unknown').replace(/_/g, ' '))}
               </span>
             </td>
-            <td><small>${escapeHtml(log.details || log.metadata || JSON.stringify(log))}</small></td>
+            <td><small>${escapeHtml(auditDetails(log))}</small></td>
           </tr>
-        `).join('') : '<tr class="empty-row"><td colspan="3">No audit logs found yet.</td></tr>'}
+        `).join('') : '<tr class="empty-row"><td colspan="4">No audit logs found yet. They appear here as soon as you edit, hide or delete a recipe.</td></tr>'}
       </tbody>
-    </table></div>
+    </table></div>`}
   `);
 }
 
@@ -401,21 +451,29 @@ document.addEventListener('click', event => {
     return loadAll();
   }
   
+  // Hide / unhide straight from the row -- no need to open the edit form.
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
     const nextShared = toggle.dataset.currentlyShared !== 'true';
-    authFetch(`/api/admin/recipes/${id}`, { 
-      method: 'PATCH', 
-      body: JSON.stringify({ is_shared: nextShared }) 
+    toggle.disabled = true;
+    authFetch(`/api/admin/recipes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_shared: nextShared })
     })
-    .then(() => {
-      state.recipes = state.recipes.map(r => r.id === id ? { ...r, is_shared: nextShared } : r);
+    .then(({ recipe }) => {
+      state.recipes = state.recipes.map(r => r.id === id
+        ? { ...r, ...(recipe || {}), is_shared: recipe?.is_shared ?? nextShared }
+        : r);
       if (state.editingRecipeId === id) state.editingRecipeId = null;
-      render();
-      showToast(nextShared ? 'Recipe unhidden — visible in Explore' : 'Recipe hidden from Explore');
+      rerenderTab();
+      showToast(nextShared ? 'Recipe unhidden \u2014 visible in Explore' : 'Recipe hidden from Explore');
+      refreshAuditLog();
     })
-    .catch(err => showToast(err.message));
+    .catch(err => {
+      toggle.disabled = false;
+      showToast(err.message);
+    });
     return;
   }
 
@@ -424,12 +482,16 @@ document.addEventListener('click', event => {
   if (editBtn) {
     const id = editBtn.dataset.editRecipe;
     state.editingRecipeId = state.editingRecipeId === id ? null : id;
-    return renderRecipes();
+    rerenderTab();
+    const openedRow = state.editingRecipeId && app.querySelector(`[data-edit-row="${state.editingRecipeId}"]`);
+    if (openedRow) openedRow.scrollIntoView({ block: 'nearest' });
+    return;
   }
 
   if (event.target.closest('[data-cancel-edit]')) {
     state.editingRecipeId = null;
-    return renderRecipes();
+    rerenderTab();
+    return;
   }
 
   // SAVE recipe edits -- only the fields that actually changed get sent
@@ -447,11 +509,13 @@ document.addEventListener('click', event => {
       const value = f.type === 'number'
         ? (input.value === '' ? null : Number(input.value))
         : input.value.trim();
-      if (value !== original[f.key]) payload[f.key] = value;
+      // Compare against what the row actually holds right now, whichever of
+      // `is_shared` / `shared` this deployment uses.
+      if (value !== (original[f.key] ?? '')) payload[f.key] = value;
     });
 
     const sharedInput = container.querySelector('[data-edit-field="is_shared"]');
-    if (sharedInput && Boolean(sharedInput.checked) !== Boolean(original.is_shared)) {
+    if (sharedInput && Boolean(sharedInput.checked) !== recipeShared(original)) {
       payload.is_shared = sharedInput.checked;
     }
 
@@ -467,8 +531,9 @@ document.addEventListener('click', event => {
         // shows saved values without waiting for a full reload.
         state.recipes = state.recipes.map(r => r.id === id ? { ...r, ...(recipe || payload) } : r);
         state.editingRecipeId = null;
-        render();
+        rerenderTab();
         showToast('Recipe updated');
+        refreshAuditLog();
       })
       .catch(err => {
         saveRecipe.disabled = false;
@@ -483,18 +548,22 @@ document.addEventListener('click', event => {
     const recipe = state.recipes.find(r => r.id === id);
     const label = recipe ? `"${recipe.name}"` : 'this recipe';
     if (!window.confirm(`Delete ${label}? This can't be undone.`)) return;
+    del.disabled = true;
     authFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' })
     .then(() => {
       state.recipes = state.recipes.filter(r => r.id !== id);
       if (state.editingRecipeId === id) state.editingRecipeId = null;
-      render();
+      rerenderTab();
       showToast('Recipe deleted');
+      refreshAuditLog();
     })
-    .catch(err => showToast(err.message));
+    .catch(err => {
+      del.disabled = false;
+      showToast(err.message);
+    });
     return;
   }
 });
-
 
 document.addEventListener('submit', event => {
   if (event.target.id !== 'admin-login') return;
@@ -513,14 +582,16 @@ document.addEventListener('submit', event => {
   });
 });
 
+// Typing in a search box re-renders the table, so keep the scroll position of
+// the right-hand pane instead of jumping back to the top on every keystroke.
 document.addEventListener('input', event => {
   if (event.target.id === 'user-search') { 
     state.userSearch = event.target.value; 
-    return renderUsers(); 
+    return rerenderTab(); 
   }
   if (event.target.id === 'recipe-search') { 
     state.recipeSearch = event.target.value; 
-    return renderRecipes(); 
+    return rerenderTab(); 
   }
 });
 
