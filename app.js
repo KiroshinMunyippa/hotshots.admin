@@ -78,16 +78,15 @@ const isMissingColumnError = (err) => /does not exist|column .*not (?:be )?found
 // The fields the popup edit form exposes. `text`/`number` inputs are one-liners,
 // `textarea` gets a full-width row. Values come straight off the API row.
 // Cuisine and Price are intentionally not editable here -- they stay untouched
-// on the recipe row. `file: true` on Image URL adds a "Choose file" picker that
-// reads an image from the local PC and drops it into the field as a data URL.
+// on the recipe row. `file: true` on Image renders a plain "Add image" control
+// with a file input directly underneath it (no URL text box).
 const RECIPE_EDIT_FIELDS = [
   { key: 'name', label: 'Name', type: 'text' },
   { key: 'category', label: 'Category', type: 'text' },
   { key: 'difficulty', label: 'Difficulty', type: 'text' },
   { key: 'prep_time', label: 'Prep time (min)', type: 'number' },
-  { key: 'cook_time', label: 'Cook time (min)', type: 'number' },
   { key: 'servings', label: 'Servings', type: 'number' },
-  { key: 'image_url', label: 'Image URL', type: 'text', full: true, file: true },
+  { key: 'image_url', label: 'Image', type: 'file', full: true },
   { key: 'description', label: 'Description', type: 'textarea', full: true }
 ];
 
@@ -290,11 +289,7 @@ function renderUsers() {
             <td><div class="row-actions">
               <select data-field="subscription_plan"><option value="free" ${u.subscription_plan === 'free' ? 'selected' : ''}>Free</option><option value="plus" ${u.subscription_plan === 'plus' ? 'selected' : ''}>Plus</option><option value="pro" ${u.subscription_plan === 'pro' ? 'selected' : ''}>Pro</option></select>
               <select data-field="subscription_status"><option value="active" ${u.subscription_status === 'active' ? 'selected' : ''}>Active</option><option value="trialing" ${u.subscription_status === 'trialing' ? 'selected' : ''}>Trialing</option><option value="past_due" ${u.subscription_status === 'past_due' ? 'selected' : ''}>Past due</option><option value="canceled" ${u.subscription_status === 'canceled' ? 'selected' : ''}>Canceled</option></select>
-              <button class="icon-button save" data-save-user="${u.id}">Save</button>
               <button class="icon-button" data-edit-user="${u.id}">Edit</button>
-              ${u.id === state.adminProfile?.id
-                ? ''
-                : `<button class="icon-button${u.is_admin ? ' danger' : ''}" data-flag-admin="${u.id}" data-flagged="${Boolean(u.is_admin)}">${u.is_admin ? 'Unflag' : 'Flag'}</button>`}
             </div></td>
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">No users match that search.</td></tr>'}
       </tbody>
@@ -303,8 +298,9 @@ function renderUsers() {
 }
 
 // Users tab: "Flag"/"Unflag" grants or revokes admin access for an account.
-// Your own row has no button -- the server rejects self-changes anyway (see
-// toggleAdminFlag below).
+// It now lives in the Edit popup's submenu instead of on every table row --
+// your own account has no button; the server rejects self-changes anyway
+// (see toggleAdminFlag below).
 
 // The Users tab "Edit" popup: full account details (name, email, plan, status,
 // admin flag) in one form. Same modal markup/styling as the recipe editor.
@@ -323,6 +319,11 @@ function userEditModal(u) {
     return `<label class="edit-field ${f.type === 'text' ? '' : 'full'}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
   }).join('');
 
+  // Sub menu shown under Save/Cancel: Flag / Unflag admin access.
+  const flagButton = u.id === state.adminProfile?.id
+    ? ''
+    : `<button type="button" class="icon-button${u.is_admin ? ' danger' : ''}" data-flag-admin="${u.id}" data-flagged="${Boolean(u.is_admin)}">${u.is_admin ? 'Unflag' : 'Flag user'}</button>`;
+
   return `
     <div class="modal-backdrop" id="user-edit-modal" data-modal-for="${u.id}">
       <div class="modal" role="dialog" aria-modal="true" aria-label="Edit user">
@@ -337,6 +338,7 @@ function userEditModal(u) {
             <button type="submit" class="icon-button save" ${saving ? 'disabled' : ''}>${saving ? 'Saving…' : 'Save changes'}</button>
             <button type="button" class="icon-button" data-cancel-user-edit>Cancel</button>
           </div>
+          ${flagButton ? `<div class="submenu-row"><span class="submenu-label">More actions</span><div class="row-actions">${flagButton}</div></div>` : ''}
         </form>
       </div>
     </div>`;
@@ -374,9 +376,10 @@ const withSharedFlags = (recipe, shared) => Object.fromEntries(
 );
 
 // One row per recipe. Editing happens in a popup (see recipeEditModal), so the
-// table rows stay compact and never get squashed by an inline form.
+// table rows stay compact and never get squashed by an inline form. Only the
+// Edit button is visible on the row -- Hide/Unhide and Delete live in the
+// popup's submenu.
 function recipeRow(r) {
-  const shared = recipeShared(r);
   const priceCell = anyRecipeHasPrice()
     ? `<td>${r.price !== undefined && r.price !== null && r.price !== '' ? formatRands(r.price) : '—'}</td>`
     : '';
@@ -390,35 +393,34 @@ function recipeRow(r) {
       <td>${formatDate(r.created_at)}</td>
       <td><div class="row-actions">
         <button class="icon-button" data-edit-recipe="${r.id}">Edit</button>
-        <button class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${shared}">${shared ? 'Hide' : 'Unhide'}</button>
-        <button class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
       </div></td>
     </tr>`;
 }
 
 // The Edit button opens this popup instead of an inline form squashed into a
 // table cell. It's rendered after the table so it floats above everything.
+// The submenu under Save/Cancel carries the visible Hide/Unhide button and the
+// red Delete button.
 function recipeEditModal(r) {
   const fields = RECIPE_EDIT_FIELDS.map(f => {
     const value = r[f.key] ?? '';
     let input;
     if (f.type === 'textarea') {
       input = `<textarea data-edit-field="${f.key}" rows="3">${escapeHtml(value)}</textarea>`;
+    } else if (f.type === 'file') {
+      // "Add image": a plain button with the file input directly underneath it,
+      // plus a thumbnail of whatever image the recipe currently has.
+      const isPreviewable = typeof value === 'string' && /^(https?:|data:image\/)/i.test(value);
+      input = `
+        <span class="image-picker">
+          <button type="button" class="ghost-button small" data-pick-image="${f.key}">Add image</button>
+          <input type="file" accept="image/*" data-image-file="${f.key}">
+          <img class="image-preview ${isPreviewable ? '' : 'hidden'}" data-image-preview="${f.key}" src="${isPreviewable ? escapeHtml(value) : ''}" alt="">
+        </span>`;
     } else if (f.money) {
       input = `<span class="input-affix"><span class="affix">R</span><input type="number" data-edit-field="${f.key}" min="${f.min ?? 0}" step="${f.step ?? 1}" value="${escapeHtml(value)}"></span>`;
     } else {
       input = `<input type="${f.type}" data-edit-field="${f.key}"${f.min !== undefined ? ` min="${f.min}"` : ''}${f.step !== undefined ? ` step="${f.step}"` : ''} value="${escapeHtml(value)}">`;
-    }
-    // Image URL additionally gets a "choose from this PC" button plus a live
-    // thumbnail of whatever the field currently points at.
-    if (f.file) {
-      const isPreviewable = typeof value === 'string' && /^(https?:|data:image\/)/i.test(value);
-      input += `
-        <span class="image-picker">
-          <input type="file" accept="image/*" data-image-file="${f.key}" hidden>
-          <button type="button" class="ghost-button small" data-pick-image="${f.key}">Choose from PC…</button>
-          <img class="image-preview ${isPreviewable ? '' : 'hidden'}" data-image-preview="${f.key}" src="${isPreviewable ? escapeHtml(value) : ''}" alt="">
-        </span>`;
     }
     return `<label class="edit-field ${f.full ? 'full' : ''}"><span>${escapeHtml(f.label)}</span>${input}</label>`;
   }).join('');
@@ -437,6 +439,13 @@ function recipeEditModal(r) {
           <div class="edit-actions">
             <button type="submit" class="icon-button save" data-save-recipe="${r.id}">Save changes</button>
             <button type="button" class="icon-button" data-cancel-edit>Cancel</button>
+          </div>
+          <div class="submenu-row">
+            <span class="submenu-label">More actions</span>
+            <div class="row-actions">
+              <button type="button" class="icon-button" data-toggle-shared="${r.id}" data-currently-shared="${shared}">${shared ? 'Hide' : 'Unhide'}</button>
+              <button type="button" class="icon-button danger" data-delete-recipe="${r.id}">Delete</button>
+            </div>
           </div>
         </form>
       </div>
@@ -924,29 +933,8 @@ document.addEventListener('click', event => {
     return;
   }
 
-  const saveUser = event.target.closest('[data-save-user]');
-  if (saveUser) {
-    const id = saveUser.dataset.saveUser;
-    const row = saveUser.closest('[data-user-row]');
-    // The inline selects can be missing if the row re-rendered underneath us;
-    // fall back to what's cached so Save never throws.
-    const cached = state.users.find(u => u.id === id) || {};
-    const plan = row?.querySelector('[data-field="subscription_plan"]')?.value ?? cached.subscription_plan;
-    const status = row?.querySelector('[data-field="subscription_status"]')?.value ?? cached.subscription_status;
-    authFetch(`/api/admin/users/${id}`, { 
-      method: 'PATCH', 
-      body: JSON.stringify({ subscription_plan: plan, subscription_status: status }) 
-    })
-    .then(({ user }) => { 
-      state.users = state.users.map(u => u.id === id ? { ...u, ...user } : u); 
-      render(); 
-      showToast('Updated user'); 
-    })
-    .catch(err => showToast(err.message));
-    return;
-  }
-
-  // USERS: flag/unflag an account from its row (kept in sync with Settings).
+  // USERS: flag/unflag an account from the Edit popup's submenu (kept in
+  // sync with Settings).
   const flagBtn = event.target.closest('[data-flag-admin]');
   if (flagBtn) {
     toggleAdminFlag(flagBtn);
@@ -976,7 +964,7 @@ document.addEventListener('click', event => {
     return loadAll();
   }
   
-  // Hide / unhide straight from the row -- no need to open the edit popup.
+  // Hide / unhide from the Edit popup's submenu.
   const toggle = event.target.closest('[data-toggle-shared]');
   if (toggle) {
     const id = toggle.dataset.toggleShared;
@@ -1014,7 +1002,7 @@ document.addEventListener('click', event => {
     return;
   }
 
-  // IMAGE URL: "Choose from PC" just opens the hidden file input next to it.
+  // IMAGE: "Add image" just opens the file input underneath it.
   const pickImage = event.target.closest('[data-pick-image]');
   if (pickImage) {
     const fileInput = app.querySelector(`[data-image-file="${pickImage.dataset.pickImage}"]`);
