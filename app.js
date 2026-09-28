@@ -75,6 +75,20 @@ let sharedColumn = 'is_shared';
 const SHARED_COLUMN_FALLBACKS = ['shared', 'visible', 'published'];
 const isMissingColumnError = (err) => /does not exist|column .*not (?:be )?found|undefined column|schema cache|PGRST204/i.test(err?.message || '');
 
+// Normalise whatever shape the server hands back after a visibility PATCH into
+// { recipe, shared } where `shared` is the authoritative boolean. The PATCH can
+// echo the flag under the canonical name (`is_shared`), under the alias the GET
+// endpoint adds (`shared`), or under whichever alternative column this schema
+// actually has -- so check every candidate instead of trusting one spelling.
+// If none of them come back at all, fall back to `fallbackShared` (the value we
+// just sent) rather than letting the badge flip out of sync with the switch.
+const normaliseSharedUpdate = (updated, fallbackShared) => {
+  if (!updated) return { recipe: {}, shared: Boolean(fallbackShared) };
+  const foundKey = SHARED_FLAG_FIELDS.find(k => updated[k] !== undefined && updated[k] !== null);
+  const shared = foundKey ? toBool(updated[foundKey]) : Boolean(fallbackShared);
+  return { recipe: updated, shared };
+};
+
 // Read-only info shown at the top of the recipe edit popup: who made it, when
 // it was created and its current rating. These aren't editable by an admin --
 // ratings belong to the community and authorship is fixed -- so they're display
@@ -811,16 +825,28 @@ function settingControl(item) {
             <span class="slider"></span>
           </label>
         </div>`;
-    case 'number':
+    case 'number': {
+      // Money settings (plan prices) get explicit +/- buttons that nudge the
+      // price by R1 per click -- easier than hunting for the tiny browser spin
+      // arrows, and they save through the same change handler as typing does.
+      const stepper = item.money ? `
+          <span class="price-stepper">
+            <button type="button" class="icon-button step" data-price-step="-1" data-setting-ref="${item.key}" aria-label="Decrease ${escapeHtml(item.label)} by 1">&minus;</button>
+            <button type="button" class="icon-button step" data-price-step="1" data-setting-ref="${item.key}" aria-label="Increase ${escapeHtml(item.label)} by 1">+</button>
+          </span>` : '';
       return `
         <div class="setting-row">
           <div class="setting-copy">
             <strong>${escapeHtml(item.label)}</strong>
             ${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ''}
           </div>
-          <input class="setting-input narrow" type="number" data-setting="${item.key}" data-type="number"
-                 min="${item.min ?? 0}" step="${item.step ?? 1}" value="${escapeHtml(value ?? '')}">
+          <span class="setting-number-group">
+            <input class="setting-input narrow" type="number" data-setting="${item.key}" data-type="number" data-step-by="1"
+                   min="${item.min ?? 0}" step="${item.step ?? 1}" value="${escapeHtml(value ?? '')}">
+            ${stepper}
+          </span>
         </div>`;
+    }
     case 'list': {
       const asText = Array.isArray(value) ? value.join(', ') : (value ?? '');
       return `
@@ -1007,20 +1033,18 @@ document.addEventListener('click', event => {
     const nextShared = toggle.checked;
     toggle.disabled = true;
     patchRecipe(id, { is_shared: nextShared })
-    .then(({ recipe: updated }) => {
+    .then((res) => {
+      // The PATCH reply can echo the flag under `is_shared`, under the GET
+      // alias `shared`, or under whichever alternative column this schema
+      // has -- normalise it so the cached row always carries the real value.
+      const { recipe: updated, shared } = normaliseSharedUpdate(res?.recipe, nextShared);
       state.recipes = state.recipes.map(r => {
         if (r.id !== id) return r;
-        const merged = { ...r, ...(updated || {}) };
-        // Server copy wins if it carries a visibility flag; otherwise assume
-        // the PATCH succeeded and mirror `nextShared` across every alias --
-        // recipeShared() reads whichever column this deployment actually has.
-        const finalShared = updated && SHARED_FLAG_FIELDS.some(k => updated[k] != null)
-          ? recipeShared(updated)
-          : nextShared;
-        return { ...merged, ...withSharedFlags(merged, finalShared) };
+        const merged = { ...r, ...updated };
+        return { ...merged, ...withSharedFlags(merged, shared) };
       });
       rerenderTab();
-      showToast(nextShared ? 'Recipe visible in Explore' : 'Recipe hidden from Explore');
+      showToast(shared ? 'Recipe visible in Explore' : 'Recipe hidden from Explore');
       refreshAuditLog();
     })
     .catch(err => {
@@ -1118,6 +1142,22 @@ document.addEventListener('click', event => {
     return;
   }
 
+  // SETTINGS (Plans & Billing): +/- buttons nudge a plan price by R1 per click.
+  // The new value is written into the input and saved through the same path as
+  // typing it manually, so it lands in app_settings and the audit log.
+  const stepBtn = event.target.closest('[data-price-step]');
+  if (stepBtn) {
+    const input = app.querySelector(`[data-setting="${stepBtn.dataset.settingRef}"]`);
+    if (!input || input.disabled) return;
+    const delta = Number(stepBtn.dataset.priceStep);
+    const current = Number(input.value);
+    const start = Number.isFinite(current) ? current : Number(getSetting(stepBtn.dataset.settingRef)) || 0;
+    const next = Math.max(Number(input.min) || 0, +(start + delta).toFixed(2));
+    input.value = String(next);
+    saveSetting(input);
+    return;
+  }
+
   // RECIPES: "Download CSV" for the rows currently shown in the table.
   if (event.target.closest('#export-recipes-csv')) {
     exportRecipesCsv();
@@ -1194,8 +1234,16 @@ function submitRecipeForm(id, container, button) {
   patchRecipe(id, payload)
     .then(({ recipe }) => {
       // Merge whatever the server confirmed over the cached row, so the table
-      // shows saved values without waiting for a full reload.
-      state.recipes = state.recipes.map(r => r.id === id ? { ...r, ...(recipe || payload) } : r);
+      // shows saved values without waiting for a full reload. The reply echoes
+      // the visibility flag under whichever column name this schema uses, so
+      // re-derive every alias from it -- otherwise the badge could flip back to
+      // "Visible" after a save even though the switch was just turned off.
+      state.recipes = state.recipes.map(r => {
+        if (r.id !== id) return r;
+        const merged = { ...r, ...(recipe || payload) };
+        const shared = normaliseSharedUpdate(recipe, recipeShared(r)).shared;
+        return { ...merged, ...withSharedFlags(merged, shared) };
+      });
       state.editingRecipeId = null;
       rerenderTab();
       showToast('Recipe updated');
