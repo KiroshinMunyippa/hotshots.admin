@@ -89,6 +89,10 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .setting-copy small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .setting-input.narrow { width: 110px; flex: none; }
 .setting-input.wide { width: 100%; }
+/* Number input + the R1 +/- stepper used by the Plans & Billing prices. */
+.setting-number-group { display: flex; align-items: center; gap: 6px; flex: none; }
+.price-stepper { display: inline-flex; gap: 4px; }
+.price-stepper .icon-button.step { min-width: 28px; padding: 5px 8px; font-size: 13px; line-height: 1; cursor: pointer; }
 .setting-note { display: block; margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .setting-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .secret-row { display: flex; gap: 8px; align-items: center; }
@@ -124,11 +128,13 @@ td.name-cell small { color: var(--muted); font-size: 11px; }
 .edit-field.full { grid-column: 1 / -1; }
 .edit-field input, .edit-field textarea, .edit-field select { width: 100%; font-size: 13px; text-transform: none; letter-spacing: normal; }
 
-/* Image row in the recipe edit popup: "Add image" button, file input under it,
-   plus a thumbnail of the current image. */
+/* Image row in the recipe edit popup: just the "Add photo" button and a
+   thumbnail of the current image. The <input type="file"> stays in the DOM so
+   the button can open the OS picker via .click(), but it's visually hidden --
+   no browser "Choose file" control on screen. */
 .image-picker { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 4px; }
 .image-picker .ghost-button.small { width: 100%; }
-.image-picker input[type="file"] { font-size: 12px; text-transform: none; letter-spacing: normal; color: var(--muted); width: 100%; }
+.image-picker input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; clip-path: inset(50%); overflow: hidden; }
 .ghost-button.small { padding: 5px 10px; font-size: 12px; white-space: nowrap; }
 .image-preview { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); }
 .image-preview.hidden { display: none; }
